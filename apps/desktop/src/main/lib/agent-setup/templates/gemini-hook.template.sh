@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 {{MARKER}}
 # Called by Gemini CLI hooks to notify Superset of agent lifecycle events
 # Events: BeforeAgent → Start, AfterAgent → Stop, AfterTool → Start

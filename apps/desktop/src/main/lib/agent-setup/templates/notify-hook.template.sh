@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 {{MARKER}}
 # Called by CLI agents (Claude Code, Codex, etc.) when they complete or need input
 

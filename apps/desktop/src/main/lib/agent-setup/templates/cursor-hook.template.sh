@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 {{MARKER}}
 # Called by cursor-agent hooks to notify Superset of agent lifecycle events
 # Events: Start (beforeSubmitPrompt), Stop (stop),
