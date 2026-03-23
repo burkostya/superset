@@ -1,6 +1,4 @@
 import type { FileUIPart } from "ai";
-import { apiTrpcClient } from "renderer/lib/api-trpc-client";
-import { isDesktopChatDevMode } from "renderer/lib/dev-chat";
 
 async function getHttpErrorDetail(response: Response): Promise<string> {
 	const errorBody = await response
@@ -31,7 +29,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function uploadFile(
-	sessionId: string,
+	_sessionId: string,
 	file: FileUIPart,
 	signal?: AbortSignal,
 ): Promise<FileUIPart> {
@@ -46,24 +44,13 @@ async function uploadFile(
 	if (signal?.aborted) {
 		throw new DOMException("The operation was aborted", "AbortError");
 	}
-	const fileData = await blobToDataUrl(blob);
 
-	if (isDesktopChatDevMode()) {
-		return {
-			type: "file",
-			url: fileData,
-			mediaType: file.mediaType,
-			filename,
-		};
-	}
-
-	const result = await apiTrpcClient.chat.uploadAttachment.mutate({
-		sessionId,
+	return {
+		type: "file",
+		url: await blobToDataUrl(blob),
 		filename,
 		mediaType: file.mediaType,
-		fileData,
-	});
-	return { type: "file", ...result };
+	};
 }
 
 export async function uploadFiles(

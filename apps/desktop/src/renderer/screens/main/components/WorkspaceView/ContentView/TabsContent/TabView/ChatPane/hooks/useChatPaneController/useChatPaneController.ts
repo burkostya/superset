@@ -1,27 +1,10 @@
 import { toast } from "@superset/ui/sonner";
-import { eq } from "@tanstack/db";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StartFreshSessionResult } from "renderer/components/Chat/ChatInterface/types";
-import { env } from "renderer/env.renderer";
-import { apiTrpcClient } from "renderer/lib/api-trpc-client";
-import { authClient, getAuthToken } from "renderer/lib/auth-client";
-import {
-	isDesktopChatDevMode,
-	isDesktopChatSessionReady,
-	resolveDesktopChatOrganizationId,
-} from "renderer/lib/dev-chat";
 import { electronTrpc } from "renderer/lib/electron-trpc";
-import { posthog } from "renderer/lib/posthog";
-import { useCollections } from "renderer/routes/_authenticated/providers/CollectionsProvider";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import type { ChatLaunchConfig } from "shared/tabs-types";
 import { reportChatError } from "../../utils/reportChatError";
-import { createSessionInitRunner } from "../../utils/session-init-runner";
-
-const apiUrl = env.NEXT_PUBLIC_API_URL;
-const SESSION_INIT_RETRY_DELAY_MS = 1500;
-const SESSION_INIT_MAX_RETRIES = 3;
 
 interface SessionSelectorItem {
 	sessionId: string;
@@ -53,76 +36,14 @@ interface UseChatPaneControllerReturn {
 function toSessionSelectorItem(session: {
 	id: string;
 	title: string | null;
-	lastActiveAt: Date | string | null;
-	createdAt: Date | string;
+	lastActiveAt: number;
+	createdAt: number;
 }): SessionSelectorItem {
 	return {
 		sessionId: session.id,
 		title: session.title ?? "",
-		updatedAt:
-			session.lastActiveAt instanceof Date
-				? session.lastActiveAt
-				: session.lastActiveAt
-					? new Date(session.lastActiveAt)
-					: session.createdAt instanceof Date
-						? session.createdAt
-						: new Date(session.createdAt),
+		updatedAt: new Date(session.lastActiveAt || session.createdAt),
 	};
-}
-
-async function getHttpErrorDetail(response: Response): Promise<string> {
-	const errorBody = await response
-		.text()
-		.then((text) => text.trim())
-		.catch(() => "");
-	const statusText = response.statusText ? ` ${response.statusText}` : "";
-	const detail = errorBody ? ` - ${errorBody.slice(0, 500)}` : "";
-	return `${response.status}${statusText}${detail}`;
-}
-
-async function createSessionRecord(input: {
-	sessionId: string;
-	organizationId: string;
-	workspaceId: string;
-}): Promise<void> {
-	if (isDesktopChatDevMode()) return;
-	const token = getAuthToken();
-	const response = await fetch(`${apiUrl}/api/chat/${input.sessionId}`, {
-		method: "PUT",
-		headers: {
-			"Content-Type": "application/json",
-			...(token ? { Authorization: `Bearer ${token}` } : {}),
-		},
-		body: JSON.stringify({
-			organizationId: input.organizationId,
-			workspaceId: input.workspaceId,
-		}),
-	});
-
-	if (!response.ok) {
-		const detail = await getHttpErrorDetail(response);
-		console.warn("[chat-sessions] create session failed", {
-			sessionId: input.sessionId,
-			organizationId: input.organizationId,
-			workspaceId: input.workspaceId,
-			detail,
-		});
-		throw new Error(`Failed to create session ${input.sessionId}: ${detail}`);
-	}
-}
-
-async function deleteSessionRecord(sessionId: string): Promise<void> {
-	if (isDesktopChatDevMode()) return;
-	const token = getAuthToken();
-	const response = await fetch(`${apiUrl}/api/chat/${sessionId}/stream`, {
-		method: "DELETE",
-		headers: token ? { Authorization: `Bearer ${token}` } : {},
-	});
-
-	if (!response.ok) {
-		const detail = await getHttpErrorDetail(response);
-		throw new Error(`Failed to delete session ${sessionId}: ${detail}`);
-	}
 }
 
 export function useChatPaneController({
@@ -137,301 +58,121 @@ export function useChatPaneController({
 	const sessionId = pane?.chat?.sessionId ?? null;
 	const launchConfig = pane?.chat?.launchConfig ?? null;
 	const needsLegacySessionBootstrap = sessionId === null;
-	const { data: session } = authClient.useSession();
-	const organizationId = resolveDesktopChatOrganizationId(
-		session?.session?.activeOrganizationId,
-	);
-	const collections = useCollections();
 	const legacySessionBootstrapRef = useRef(false);
-	const ensuredRef = useRef<string | null>(null);
+	const [isSessionInitializing, setIsSessionInitializing] = useState(false);
 
 	const { data: workspace } = electronTrpc.workspaces.get.useQuery(
 		{ id: workspaceId },
 		{ enabled: Boolean(workspaceId) },
 	);
+	const { data: sessionsData = [] } = electronTrpc.chatSessions.list.useQuery({
+		workspaceId,
+	});
+	const upsertSession = electronTrpc.chatSessions.upsert.useMutation();
+	const removeSession = electronTrpc.chatSessions.remove.useMutation();
 
-	const { data: remoteWorkspaces } = useLiveQuery(
-		(q) =>
-			q
-				.from({ ws: collections.workspaces })
-				.where(({ ws }) => eq(ws.id, workspaceId))
-				.select(({ ws }) => ({ id: ws.id })),
-		[collections.workspaces, workspaceId],
-	);
-	const existsRemotely = Boolean(
-		remoteWorkspaces && remoteWorkspaces.length > 0,
+	const sessions = useMemo(() => sessionsData ?? [], [sessionsData]);
+	const hasCurrentSessionRecord = Boolean(
+		sessionId && sessions.some((item) => item.id === sessionId),
 	);
 
-	useEffect(() => {
-		if (isDesktopChatDevMode()) return;
-		if (existsRemotely) return;
-		if (!workspace?.project || !organizationId) return;
-		if (ensuredRef.current === workspaceId) return;
-
-		const project = workspace.project;
-		const repoName = project.mainRepoPath.split("/").pop();
-		if (!repoName || !project.githubOwner) return;
-
-		ensuredRef.current = workspaceId;
-
-		apiTrpcClient.workspace.ensure
-			.mutate({
-				organizationId,
-				project: {
-					name: project.name,
-					slug: repoName.toLowerCase(),
-					repoOwner: project.githubOwner,
-					repoName,
-					repoUrl: `https://github.com/${project.githubOwner}/${repoName}`,
-					defaultBranch: project.defaultBranch ?? "main",
-				},
-				workspace: {
-					id: workspaceId,
-					name: workspace.name,
-					type: "local",
-					config: {
-						path: workspace.worktreePath,
-						branch:
-							workspace.worktree?.branch ?? project.defaultBranch ?? "main",
-					},
-				},
-			})
-			.catch((error) => {
+	const ensureSession = useCallback(
+		async (targetSessionId: string): Promise<boolean> => {
+			setIsSessionInitializing(true);
+			try {
+				await upsertSession.mutateAsync({
+					id: targetSessionId,
+					workspaceId,
+				});
+				return true;
+			} catch (error) {
 				reportChatError({
-					operation: "workspace.ensure",
+					operation: "session.ensure.local",
 					error,
+					sessionId: targetSessionId,
 					workspaceId,
 					paneId,
-					organizationId,
+					cwd: workspace?.worktreePath ?? undefined,
 				});
-				ensuredRef.current = null;
-			});
-	}, [existsRemotely, organizationId, paneId, workspace, workspaceId]);
-
-	const { data: allSessionsData } = useLiveQuery(
-		(q) =>
-			q
-				.from({ chatSessions: collections.chatSessions })
-				.orderBy(({ chatSessions }) => chatSessions.lastActiveAt, "desc")
-				.select(({ chatSessions }) => ({ ...chatSessions })),
-		[collections.chatSessions],
+				return false;
+			} finally {
+				setIsSessionInitializing(false);
+			}
+		},
+		[paneId, upsertSession, workspace?.worktreePath, workspaceId],
 	);
-	const allSessions = allSessionsData ?? [];
-	const sessions = useMemo(() => {
-		const scopedOrUnscoped = allSessions.filter(
-			(item) => item.workspaceId === workspaceId || item.workspaceId === null,
-		);
-		return scopedOrUnscoped.length > 0 ? scopedOrUnscoped : allSessions;
-	}, [allSessions, workspaceId]);
-	const hasCurrentSessionRecord = isDesktopChatSessionReady({
-		sessionId,
-		hasPersistedSession: Boolean(
-			sessionId && sessions.some((item) => item.id === sessionId),
-		),
-	});
-	const [isSessionInitializing, setIsSessionInitializing] = useState(false);
-	const hasCurrentSessionRecordRef = useRef(hasCurrentSessionRecord);
-	const sessionInitScopeRef = useRef<string | null>(null);
-	const sessionInitRunnerRef = useRef<ReturnType<
-		typeof createSessionInitRunner
-	> | null>(null);
-
-	useEffect(() => {
-		hasCurrentSessionRecordRef.current = hasCurrentSessionRecord;
-	}, [hasCurrentSessionRecord]);
-
-	if (!sessionInitRunnerRef.current) {
-		sessionInitRunnerRef.current = createSessionInitRunner({
-			maxRetries: SESSION_INIT_MAX_RETRIES,
-			retryDelayMs: SESSION_INIT_RETRY_DELAY_MS,
-			hasCurrentSessionRecord: () => hasCurrentSessionRecordRef.current,
-			isScopeCurrent: (scopeKey) => sessionInitScopeRef.current === scopeKey,
-			setIsSessionInitializing,
-			createSessionRecord: async (scope) => {
-				await createSessionRecord({
-					sessionId: scope.sessionId,
-					organizationId: scope.organizationId,
-					workspaceId: scope.workspaceId,
-				});
-			},
-			reportCreateSessionError: (error, scope) => {
-				reportChatError({
-					operation: "session.create",
-					error,
-					sessionId: scope.sessionId,
-					workspaceId: scope.workspaceId,
-					paneId,
-					organizationId: scope.organizationId,
-				});
-			},
-			onRetryExhausted: () => {
-				toast.error("Failed to initialize chat session");
-			},
-		});
-	}
-
-	useEffect(() => {
-		return () => {
-			sessionInitRunnerRef.current?.dispose();
-		};
-	}, []);
-
-	useEffect(() => {
-		const scope = `${organizationId ?? "none"}:${workspaceId}:${sessionId ?? "none"}`;
-		if (sessionInitScopeRef.current === scope) return;
-		sessionInitScopeRef.current = scope;
-		sessionInitRunnerRef.current?.resetScope(scope);
-	}, [organizationId, sessionId, workspaceId]);
-
-	const currentSessionInitScope = useMemo(() => {
-		if (!sessionId || !organizationId) return null;
-		return {
-			scopeKey: `${organizationId}:${workspaceId}:${sessionId}`,
-			organizationId,
-			workspaceId,
-			sessionId,
-		};
-	}, [organizationId, sessionId, workspaceId]);
 
 	const handleSelectSession = useCallback(
 		(nextSessionId: string) => {
 			switchChatSession(paneId, nextSessionId);
-			posthog.capture("chat_session_opened", {
-				workspace_id: workspaceId,
-				session_id: nextSessionId,
-				organization_id: organizationId,
-			});
 		},
-		[organizationId, paneId, switchChatSession, workspaceId],
+		[paneId, switchChatSession],
 	);
 
 	const createAndActivateSession = useCallback(
-		async ({
-			targetOrganizationId,
-			newSessionId,
-		}: {
-			targetOrganizationId: string;
-			newSessionId: string;
-		}): Promise<StartFreshSessionResult> => {
-			try {
-				await createSessionRecord({
-					sessionId: newSessionId,
-					organizationId: targetOrganizationId,
-					workspaceId,
-				});
-				switchChatSession(paneId, newSessionId);
-				posthog.capture("chat_session_created", {
-					workspace_id: workspaceId,
-					session_id: newSessionId,
-					organization_id: targetOrganizationId,
-				});
-				return { created: true, sessionId: newSessionId };
-			} catch (error) {
-				reportChatError({
-					operation: "session.create",
-					error,
-					sessionId: newSessionId,
-					workspaceId,
-					paneId,
-					organizationId: targetOrganizationId,
-				});
+		async (newSessionId: string): Promise<StartFreshSessionResult> => {
+			const created = await ensureSession(newSessionId);
+			if (!created) {
 				return {
 					created: false,
-					errorMessage:
-						error instanceof Error
-							? error.message
-							: "Failed to create a new chat session",
+					errorMessage: "Failed to create a local chat session",
 				};
 			}
+
+			switchChatSession(paneId, newSessionId);
+			return { created: true, sessionId: newSessionId };
 		},
-		[paneId, switchChatSession, workspaceId],
+		[ensureSession, paneId, switchChatSession],
 	);
 
 	const handleNewChat = useCallback(async () => {
-		if (!organizationId) return;
-		const createResult = await createAndActivateSession({
-			targetOrganizationId: organizationId,
-			newSessionId: crypto.randomUUID(),
-		});
+		const createResult = await createAndActivateSession(crypto.randomUUID());
 		if (!createResult.created) {
-			toast.error("Failed to create session");
+			toast.error(createResult.errorMessage ?? "Failed to create chat session");
 		}
-	}, [createAndActivateSession, organizationId]);
+	}, [createAndActivateSession]);
 
 	const handleStartFreshSession = useCallback(async () => {
-		if (!organizationId) {
-			return {
-				created: false,
-				errorMessage: "No active organization selected",
-			};
-		}
-		return createAndActivateSession({
-			targetOrganizationId: organizationId,
-			newSessionId: crypto.randomUUID(),
-		});
-	}, [createAndActivateSession, organizationId]);
+		return createAndActivateSession(crypto.randomUUID());
+	}, [createAndActivateSession]);
 
 	const handleDeleteSession = useCallback(
 		async (sessionIdToDelete: string) => {
 			try {
-				await deleteSessionRecord(sessionIdToDelete);
-				posthog.capture("chat_session_deleted", {
-					workspace_id: workspaceId,
-					session_id: sessionIdToDelete,
-					organization_id: organizationId,
-				});
+				await removeSession.mutateAsync({ id: sessionIdToDelete });
 				if (sessionIdToDelete === sessionId) {
 					switchChatSession(paneId, null);
 				}
 			} catch (error) {
 				reportChatError({
-					operation: "session.delete",
+					operation: "session.delete.local",
 					error,
 					sessionId: sessionIdToDelete,
 					workspaceId,
 					paneId,
-					organizationId,
+					cwd: workspace?.worktreePath ?? undefined,
 				});
 				throw error;
 			}
 		},
-		[organizationId, paneId, sessionId, switchChatSession, workspaceId],
-	);
-
-	const runSessionInit = useCallback(
-		async ({
-			retryOnFailure,
-		}: {
-			retryOnFailure: boolean;
-		}): Promise<boolean> => {
-			if (!currentSessionInitScope) return false;
-			const runner = sessionInitRunnerRef.current;
-			if (!runner) return false;
-			return runner.run({ scope: currentSessionInitScope, retryOnFailure });
-		},
-		[currentSessionInitScope],
+		[
+			paneId,
+			removeSession,
+			sessionId,
+			switchChatSession,
+			workspace?.worktreePath,
+			workspaceId,
+		],
 	);
 
 	const ensureCurrentSessionRecord = useCallback(async (): Promise<boolean> => {
-		return runSessionInit({ retryOnFailure: false });
-	}, [runSessionInit]);
+		if (!sessionId) return false;
+		if (hasCurrentSessionRecord) return true;
+		return ensureSession(sessionId);
+	}, [ensureSession, hasCurrentSessionRecord, sessionId]);
 
 	useEffect(() => {
-		if (!currentSessionInitScope) return;
-		if (!hasCurrentSessionRecord) return;
-		sessionInitRunnerRef.current?.markReady(currentSessionInitScope.scopeKey);
-	}, [currentSessionInitScope, hasCurrentSessionRecord]);
-
-	useEffect(() => {
-		if (!currentSessionInitScope) return;
-		if (hasCurrentSessionRecord) return;
-		void runSessionInit({ retryOnFailure: true });
-	}, [currentSessionInitScope, hasCurrentSessionRecord, runSessionInit]);
-
-	useEffect(() => {
-		// Legacy fallback for panes created before session IDs were seeded at pane creation.
 		if (!needsLegacySessionBootstrap) return;
-		if (!organizationId) return;
 		if (legacySessionBootstrapRef.current) return;
 		legacySessionBootstrapRef.current = true;
 
@@ -440,26 +181,12 @@ export function useChatPaneController({
 			.finally(() => {
 				legacySessionBootstrapRef.current = false;
 			});
-	}, [handleNewChat, needsLegacySessionBootstrap, organizationId]);
+	}, [handleNewChat, needsLegacySessionBootstrap]);
 
-	const sessionItems = useMemo(() => {
-		const nextItems = sessions.map((item) => toSessionSelectorItem(item));
-		if (
-			!isDesktopChatDevMode() ||
-			!sessionId ||
-			nextItems.some((item) => item.sessionId === sessionId)
-		) {
-			return nextItems;
-		}
-		return [
-			{
-				sessionId,
-				title: "",
-				updatedAt: new Date(),
-			},
-			...nextItems,
-		];
-	}, [sessionId, sessions]);
+	const sessionItems = useMemo(
+		() => sessions.map((item) => toSessionSelectorItem(item)),
+		[sessions],
+	);
 
 	const consumeLaunchConfig = useCallback(() => {
 		setChatLaunchConfig(paneId, null);
@@ -468,7 +195,7 @@ export function useChatPaneController({
 	return {
 		sessionId,
 		launchConfig,
-		organizationId,
+		organizationId: null,
 		workspacePath: workspace?.worktreePath ?? "",
 		isSessionInitializing,
 		hasCurrentSessionRecord,

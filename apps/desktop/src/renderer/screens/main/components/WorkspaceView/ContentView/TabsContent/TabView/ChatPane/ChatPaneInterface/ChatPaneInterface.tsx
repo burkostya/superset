@@ -21,12 +21,6 @@ import type {
 	ModelOption,
 	PermissionMode,
 } from "renderer/components/Chat/ChatInterface/types";
-import { apiTrpcClient } from "renderer/lib/api-trpc-client";
-import {
-	getDesktopChatModelOptions,
-	isDesktopChatDevMode,
-} from "renderer/lib/dev-chat";
-import { posthog } from "renderer/lib/posthog";
 import { useChatPreferencesStore } from "renderer/stores/chat-preferences";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import { ChatMessageList } from "./components/ChatMessageList";
@@ -55,6 +49,34 @@ type HarnessFilePayload = {
 	filename?: string;
 	uploaded?: boolean;
 };
+
+const LOCAL_AVAILABLE_MODELS: ModelOption[] = [
+	{
+		id: "anthropic/claude-opus-4-6",
+		name: "Opus 4.6",
+		provider: "Anthropic",
+	},
+	{
+		id: "anthropic/claude-sonnet-4-6",
+		name: "Sonnet 4.6",
+		provider: "Anthropic",
+	},
+	{
+		id: "anthropic/claude-haiku-4-5",
+		name: "Haiku 4.5",
+		provider: "Anthropic",
+	},
+	{
+		id: "openai/gpt-5.4",
+		name: "GPT-5.4",
+		provider: "OpenAI",
+	},
+	{
+		id: "openai/gpt-5.3-codex",
+		name: "GPT-5.3 Codex",
+		provider: "OpenAI",
+	},
+];
 
 function ChatUploadFooter({
 	sessionId,
@@ -132,14 +154,12 @@ function useAvailableModels(): {
 	models: ModelOption[];
 	defaultModel: ModelOption | null;
 } {
-	const localModels = getDesktopChatModelOptions();
 	const { data } = useQuery({
-		queryKey: ["chat", "models"],
-		queryFn: () => apiTrpcClient.chat.getModels.query(),
-		enabled: !isDesktopChatDevMode(),
+		queryKey: ["chat", "models", "local"],
+		queryFn: async () => ({ models: LOCAL_AVAILABLE_MODELS }),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
-	const models = localModels.length > 0 ? localModels : (data?.models ?? []);
+	const models = data?.models ?? LOCAL_AVAILABLE_MODELS;
 	return { models, defaultModel: models[0] ?? null };
 }
 
@@ -248,15 +268,8 @@ export function ChatPaneInterface({
 	const authenticateMcpServerMutation =
 		chatRuntimeServiceTrpc.workspace.authenticateMcpServer.useMutation();
 	const captureChatEvent = useCallback(
-		(event: string, properties?: ChatAnalyticsProperties) => {
-			posthog.capture(event, {
-				workspace_id: workspaceId,
-				session_id: sessionId,
-				organization_id: organizationId,
-				...properties,
-			});
-		},
-		[organizationId, sessionId, workspaceId],
+		(_event: string, _properties?: ChatAnalyticsProperties) => {},
+		[],
 	);
 
 	const { data: slashCommands = [] } =
