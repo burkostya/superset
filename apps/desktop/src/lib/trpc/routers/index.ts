@@ -8,6 +8,7 @@ import { createBrowserHistoryRouter } from "./browser-history";
 import { createCacheRouter } from "./cache";
 import { createChangesRouter } from "./changes";
 import { createChatRuntimeServiceRouter } from "./chat-runtime-service";
+import { createChatSessionsRouter } from "./chat-sessions";
 import { createChatServiceRouter } from "./chat-service";
 import { createConfigRouter } from "./config";
 import { createExternalRouter } from "./external";
@@ -31,6 +32,7 @@ import { createWorkspacesRouter } from "./workspaces";
 export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 	return router({
 		chatRuntimeService: createChatRuntimeServiceRouter(),
+		chatSessions: createChatSessionsRouter(),
 		chatService: createChatServiceRouter(),
 		analytics: createAnalyticsRouter(),
 		browser: createBrowserRouter(),

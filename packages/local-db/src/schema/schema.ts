@@ -226,6 +226,39 @@ export const settings = sqliteTable("settings", {
 export type InsertSettings = typeof settings.$inferInsert;
 export type SelectSettings = typeof settings.$inferSelect;
 
+/**
+ * Local chat sessions - desktop-owned metadata for local AI chats.
+ *
+ * Message history remains in the chat runtime storage keyed by session id.
+ * This table stores the local session registry, title, and workspace scoping.
+ */
+export const chatSessions = sqliteTable(
+	"chat_sessions",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id").references(() => workspaces.id, {
+			onDelete: "set null",
+		}),
+		title: text("title"),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		lastActiveAt: integer("last_active_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [
+		index("chat_sessions_workspace_id_idx").on(table.workspaceId),
+		index("chat_sessions_last_active_at_idx").on(table.lastActiveAt),
+	],
+);
+
+export type InsertChatSession = typeof chatSessions.$inferInsert;
+export type SelectChatSession = typeof chatSessions.$inferSelect;
+
 // =============================================================================
 // Synced tables - mirrored from cloud Postgres via Electric SQL
 // Column names match Postgres exactly (snake_case) so Electric data writes directly

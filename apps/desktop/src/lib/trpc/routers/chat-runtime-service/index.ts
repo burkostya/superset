@@ -1,10 +1,9 @@
 import type { LifecycleEvent } from "@superset/chat/server/trpc";
 import { ChatRuntimeService } from "@superset/chat/server/trpc";
-import { env } from "main/env.main";
 import { appState } from "main/lib/app-state";
 import { notificationsEmitter } from "main/lib/notifications/server";
 import { NOTIFICATION_EVENTS } from "shared/constants";
-import { loadToken } from "../auth/utils/auth-functions";
+import { updateLocalChatSessionTitle } from "../chat-sessions";
 
 function resolveNotificationIdsFromSession(sessionId: string): {
 	paneId?: string;
@@ -47,12 +46,11 @@ function handleLifecycleEvent(event: LifecycleEvent): void {
 }
 
 const service = new ChatRuntimeService({
-	headers: async (): Promise<Record<string, string>> => {
-		const { token } = await loadToken();
-		if (token) return { Authorization: `Bearer ${token}` };
-		return {};
+	headers: async (): Promise<Record<string, string>> => ({}),
+	disableSupersetTools: true,
+	updateSessionTitle: async ({ sessionId, title }) => {
+		updateLocalChatSessionTitle({ id: sessionId, title });
 	},
-	apiUrl: env.NEXT_PUBLIC_API_URL,
 	onLifecycleEvent: handleLifecycleEvent,
 });
 

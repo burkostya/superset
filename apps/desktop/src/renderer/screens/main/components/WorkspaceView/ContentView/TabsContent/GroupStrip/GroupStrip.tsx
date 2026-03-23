@@ -1,6 +1,4 @@
 import type { TerminalPreset } from "@superset/local-db";
-import { eq, or } from "@tanstack/db";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
 	useCallback,
@@ -12,7 +10,6 @@ import {
 } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { usePresets } from "renderer/react-query/presets";
-import { useCollections } from "renderer/routes/_authenticated/providers/CollectionsProvider";
 import { requestTabClose } from "renderer/stores/editor-state/editorCoordinator";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import { useTabsWithPresets } from "renderer/stores/tabs/useTabsWithPresets";
@@ -27,8 +24,6 @@ import {
 import { type ActivePaneStatus, pickHigherStatus } from "shared/tabs-types";
 import { AddTabButton } from "./components/AddTabButton";
 import { GroupItem } from "./GroupItem";
-
-const NO_WORKSPACE_MATCH = "__no_workspace__";
 
 export function GroupStrip() {
 	const { workspaceId: activeWorkspaceId } = useParams({ strict: false });
@@ -164,36 +159,16 @@ export function GroupStrip() {
 		() => Array.from(chatSessionTargets.keys()),
 		[chatSessionTargets],
 	);
-	const targetSessionIdsKey = targetSessionIds.join(",");
 	const shouldSyncChatTitles =
 		Boolean(activeWorkspaceId) && targetSessionIds.length > 0;
-
-	const collections = useCollections();
-	const { data: chatSessions } = useLiveQuery(
-		(q) =>
-			q
-				.from({ chatSessions: collections.chatSessions })
-				.where(({ chatSessions }) => {
-					if (!shouldSyncChatTitles) {
-						return eq(chatSessions.workspaceId, NO_WORKSPACE_MATCH);
-					}
-					const [firstSessionId, ...restSessionIds] = targetSessionIds;
-					if (!firstSessionId) {
-						return eq(chatSessions.workspaceId, NO_WORKSPACE_MATCH);
-					}
-					let predicate = eq(chatSessions.id, firstSessionId);
-					for (const sessionId of restSessionIds) {
-						predicate = or(predicate, eq(chatSessions.id, sessionId));
-					}
-					return predicate;
-				})
-				.select(({ chatSessions }) => ({
-					id: chatSessions.id,
-					title: chatSessions.title,
-					workspaceId: chatSessions.workspaceId,
-				})),
-		[collections.chatSessions, shouldSyncChatTitles, targetSessionIdsKey],
-	);
+	const { data: allChatSessions = [] } = electronTrpc.chatSessions.list.useQuery();
+	const chatSessions = useMemo(() => {
+		if (!shouldSyncChatTitles) {
+			return [];
+		}
+		const targetIds = new Set(targetSessionIds);
+		return allChatSessions.filter((session) => targetIds.has(session.id));
+	}, [allChatSessions, shouldSyncChatTitles, targetSessionIds]);
 
 	useEffect(() => {
 		if (!shouldSyncChatTitles) return;

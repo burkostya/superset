@@ -1,13 +1,10 @@
-import { FEATURE_FLAGS } from "@superset/shared/constants";
 import {
 	createFileRoute,
 	Outlet,
 	useMatchRoute,
 	useNavigate,
 } from "@tanstack/react-router";
-import { useFeatureFlagEnabled } from "posthog-js/react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
-import { DashboardSidebar } from "renderer/routes/_authenticated/_dashboard/components/DashboardSidebar";
 import { ResizablePanel } from "renderer/screens/main/components/ResizablePanel";
 import { WorkspaceSidebar } from "renderer/screens/main/components/WorkspaceSidebar";
 import { useAppHotkey } from "renderer/stores/hotkeys";
@@ -27,8 +24,6 @@ export const Route = createFileRoute("/_authenticated/_dashboard")({
 function DashboardLayout() {
 	const navigate = useNavigate();
 	const openNewWorkspaceModal = useOpenNewWorkspaceModal();
-	const isV2CloudEnabled =
-		useFeatureFlagEnabled(FEATURE_FLAGS.V2_CLOUD) ?? false;
 	// Get current workspace from route to pre-select project in new workspace modal
 	const matchRoute = useMatchRoute();
 	const currentWorkspaceMatch = matchRoute({
@@ -57,7 +52,7 @@ function DashboardLayout() {
 	// Global hotkeys for dashboard
 	useAppHotkey(
 		"OPEN_SETTINGS",
-		() => navigate({ to: "/settings/account" }),
+		() => navigate({ to: "/settings/appearance" }),
 		undefined,
 		[navigate],
 	);
@@ -111,15 +106,11 @@ function DashboardLayout() {
 							setWorkspaceSidebarWidth(DEFAULT_WORKSPACE_SIDEBAR_WIDTH)
 						}
 					>
-						{isV2CloudEnabled ? (
-							<DashboardSidebar isCollapsed={isWorkspaceSidebarCollapsed()} />
-						) : (
-							<WorkspaceSidebar
-								isCollapsed={isWorkspaceSidebarCollapsed()}
-								activeProjectId={currentWorkspace?.projectId ?? null}
-								activeProjectName={currentWorkspace?.project?.name ?? null}
-							/>
-						)}
+						<WorkspaceSidebar
+							isCollapsed={isWorkspaceSidebarCollapsed()}
+							activeProjectId={currentWorkspace?.projectId ?? null}
+							activeProjectName={currentWorkspace?.project?.name ?? null}
+						/>
 					</ResizablePanel>
 				)}
 				<Outlet />
