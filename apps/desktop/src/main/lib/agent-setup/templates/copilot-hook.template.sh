@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 {{MARKER}}
 # Called by GitHub Copilot CLI hooks to notify Superset of agent lifecycle events
 # Events: sessionStart → Start, sessionEnd → Stop, userPromptSubmitted → Start,

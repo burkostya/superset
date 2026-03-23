@@ -1,5 +1,20 @@
 # Development
 
+With `devenv`/`direnv` from the repo root:
+
+```bash
+direnv allow
+# or: nix develop --no-pure-eval
+
+devenv shell
+install
+desktop-dev
+```
+
+This follows the current `devenv` flake workflow and loads the Bun/Node/native desktop toolchain in local-only mode.
+
+Without `devenv`:
+
 Run the dev server without env validation or auth:
 
 ```bash
