@@ -2,17 +2,11 @@ import { cn } from "@superset/ui/utils";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
 	HiOutlineBell,
-	HiOutlineBuildingOffice2,
 	HiOutlineCommandLine,
 	HiOutlineCpuChip,
-	HiOutlineCreditCard,
-	HiOutlineDevicePhoneMobile,
-	HiOutlineKey,
 	HiOutlinePaintBrush,
-	HiOutlinePuzzlePiece,
 	HiOutlineShieldCheck,
 	HiOutlineSparkles,
-	HiOutlineUser,
 } from "react-icons/hi2";
 import { LuBrain, LuGitBranch, LuKeyboard } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -23,8 +17,6 @@ interface GeneralSettingsProps {
 }
 
 type SettingsRoute =
-	| "/settings/account"
-	| "/settings/organization"
 	| "/settings/appearance"
 	| "/settings/ringtones"
 	| "/settings/keyboard"
@@ -33,10 +25,6 @@ type SettingsRoute =
 	| "/settings/agents"
 	| "/settings/terminal"
 	| "/settings/models"
-	| "/settings/integrations"
-	| "/settings/billing"
-	| "/settings/devices"
-	| "/settings/api-keys"
 	| "/settings/permissions";
 
 interface SectionItem {
@@ -54,14 +42,8 @@ interface SectionGroup {
 
 const SECTION_GROUPS: SectionGroup[] = [
 	{
-		label: "Personal",
+		label: "General",
 		items: [
-			{
-				id: "/settings/account",
-				section: "account",
-				label: "Account",
-				icon: <HiOutlineUser className="h-4 w-4" />,
-			},
 			{
 				id: "/settings/appearance",
 				section: "appearance",
@@ -114,41 +96,6 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "models",
 				label: "Models",
 				icon: <LuBrain className="h-4 w-4" />,
-			},
-		],
-	},
-	{
-		label: "Organization",
-		items: [
-			{
-				id: "/settings/organization",
-				section: "organization",
-				label: "Organization",
-				icon: <HiOutlineBuildingOffice2 className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/integrations",
-				section: "integrations",
-				label: "Integrations",
-				icon: <HiOutlinePuzzlePiece className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/billing",
-				section: "billing",
-				label: "Billing",
-				icon: <HiOutlineCreditCard className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/devices",
-				section: "devices",
-				label: "Devices",
-				icon: <HiOutlineDevicePhoneMobile className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/api-keys",
-				section: "apikeys",
-				label: "API Keys",
-				icon: <HiOutlineKey className="h-4 w-4" />,
 			},
 		],
 	},

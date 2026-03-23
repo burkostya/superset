@@ -59,7 +59,12 @@ function resolveOmModelFromAuth(): string | undefined {
 
 export interface ChatRuntimeServiceOptions {
 	headers: () => Record<string, string> | Promise<Record<string, string>>;
-	apiUrl: string;
+	apiUrl?: string;
+	disableSupersetTools?: boolean;
+	updateSessionTitle?: (input: {
+		sessionId: string;
+		title: string;
+	}) => Promise<void>;
 	onLifecycleEvent?: (event: LifecycleEvent) => void;
 }
 
@@ -69,20 +74,22 @@ export class ChatRuntimeService {
 		string,
 		Promise<RuntimeSession>
 	>();
-	private readonly apiClient: ReturnType<typeof createTRPCClient<AppRouter>>;
+	private readonly apiClient: ReturnType<typeof createTRPCClient<AppRouter>> | null;
 
 	constructor(readonly opts: ChatRuntimeServiceOptions) {
-		this.apiClient = createTRPCClient<AppRouter>({
-			links: [
-				httpBatchLink({
-					url: `${opts.apiUrl}/api/trpc`,
-					transformer: superjson,
-					async headers() {
-						return opts.headers();
-					},
-				}),
-			],
-		});
+		this.apiClient = opts.apiUrl
+			? createTRPCClient<AppRouter>({
+					links: [
+						httpBatchLink({
+							url: `${opts.apiUrl}/api/trpc`,
+							transformer: superjson,
+							async headers() {
+								return opts.headers();
+							},
+						}),
+					],
+				})
+			: null;
 	}
 
 	private async getOrCreateRuntime(
@@ -110,10 +117,13 @@ export class ChatRuntimeService {
 
 		const creationPromise = (async () => {
 			try {
-				const extraTools = await getSupersetMcpTools(
-					() => Promise.resolve(this.opts.headers()),
-					this.opts.apiUrl,
-				);
+				const extraTools =
+					this.opts.disableSupersetTools || !this.opts.apiUrl
+						? []
+						: await getSupersetMcpTools(
+								() => Promise.resolve(this.opts.headers()),
+								this.opts.apiUrl,
+							);
 
 				const omModel = resolveOmModelFromAuth();
 
@@ -278,12 +288,32 @@ export class ChatRuntimeService {
 						if (thinkingLevel) {
 							await runtime.harness.setState({ thinkingLevel });
 						}
-						void generateAndSetTitle(runtime, this.apiClient, {
-							submittedUserMessage:
-								submittedUserMessage.length > 0
-									? submittedUserMessage
-									: undefined,
-						});
+						if (this.opts.updateSessionTitle) {
+							void generateAndSetTitle(
+								runtime,
+								{
+									chat: {
+										updateTitle: {
+											mutate: ({ sessionId, title }) =>
+												this.opts.updateSessionTitle?.({ sessionId, title }),
+										},
+									},
+								} as ReturnType<typeof createTRPCClient<AppRouter>>,
+								{
+									submittedUserMessage:
+										submittedUserMessage.length > 0
+											? submittedUserMessage
+											: undefined,
+								},
+							);
+						} else if (this.apiClient) {
+							void generateAndSetTitle(runtime, this.apiClient, {
+								submittedUserMessage:
+									submittedUserMessage.length > 0
+										? submittedUserMessage
+										: undefined,
+							});
+						}
 						return runtime.harness.sendMessage(input.payload);
 					}),
 
@@ -304,12 +334,32 @@ export class ChatRuntimeService {
 							payload: input.payload,
 							metadata: input.metadata,
 						});
-						void generateAndSetTitle(runtime, this.apiClient, {
-							submittedUserMessage:
-								submittedUserMessage.length > 0
-									? submittedUserMessage
-									: undefined,
-						});
+						if (this.opts.updateSessionTitle) {
+							void generateAndSetTitle(
+								runtime,
+								{
+									chat: {
+										updateTitle: {
+											mutate: ({ sessionId, title }) =>
+												this.opts.updateSessionTitle?.({ sessionId, title }),
+										},
+									},
+								} as ReturnType<typeof createTRPCClient<AppRouter>>,
+								{
+									submittedUserMessage:
+										submittedUserMessage.length > 0
+											? submittedUserMessage
+											: undefined,
+								},
+							);
+						} else if (this.apiClient) {
+							void generateAndSetTitle(runtime, this.apiClient, {
+								submittedUserMessage:
+									submittedUserMessage.length > 0
+										? submittedUserMessage
+										: undefined,
+							});
+						}
 					}),
 
 				stop: t.procedure.input(sessionIdInput).mutation(async ({ input }) => {

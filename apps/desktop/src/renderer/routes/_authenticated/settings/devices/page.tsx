@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { DevicesSettings } from "./components/DevicesSettings";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_authenticated/settings/devices/")({
-	component: DevicesSettings,
+	component: DevicesSettingsPage,
 });
+
+function DevicesSettingsPage() {
+	return <Navigate to="/settings/appearance" replace />;
+}
