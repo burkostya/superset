@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wrapper for biome check that fails on ANY diagnostic (info, warn, or error)
 
 output=$(bunx @biomejs/biome@2.4.2 check "$@" 2>&1)

@@ -61,6 +61,10 @@ next-env.d.ts
 .envrc
 .env.local
 .env
+!.envrc
+.devenv/
+.direnv/
+devenv.lock
 
 # Reference material downloaded for agents
 examples
