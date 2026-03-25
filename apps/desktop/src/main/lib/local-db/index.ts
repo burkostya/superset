@@ -4,6 +4,7 @@ import { join } from "node:path";
 import * as schema from "@superset/local-db";
 
 import Database from "better-sqlite3";
+import type BetterSqlite3 from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { app } from "electron";
@@ -75,6 +76,34 @@ function getMigrationsDirectory(): string {
 
 const migrationsFolder = getMigrationsDirectory();
 
+type SqliteTableInfoRow = {
+	name: string;
+};
+
+function ensureLegacyForkSchemaCompatibility(db: BetterSqlite3.Database): void {
+	const worktreeColumns = db
+		.prepare<unknown[], SqliteTableInfoRow>("PRAGMA table_info(`worktrees`)")
+		.all();
+
+	if (worktreeColumns.length === 0) {
+		return;
+	}
+
+	const hasCreatedBySuperset = worktreeColumns.some(
+		(column) => column.name === "created_by_superset",
+	);
+	if (hasCreatedBySuperset) {
+		return;
+	}
+
+	console.log(
+		"[local-db] Repairing legacy fork schema: adding worktrees.created_by_superset",
+	);
+	db.exec(
+		"ALTER TABLE `worktrees` ADD `created_by_superset` integer DEFAULT true NOT NULL;",
+	);
+}
+
 const sqlite = new Database(DB_PATH);
 try {
 	chmodSync(DB_PATH, SUPERSET_SENSITIVE_FILE_MODE);
@@ -89,6 +118,7 @@ sqlite.function("uuid_is_valid_v4", (value: unknown) => {
 	if (!uuidValidate(value)) return 0;
 	return uuidVersion(value) === 4 ? 1 : 0;
 });
+ensureLegacyForkSchemaCompatibility(sqlite);
 
 console.log(`[local-db] Database initialized at: ${DB_PATH}`);
 console.log(`[local-db] Running migrations from: ${migrationsFolder}`);
