@@ -80,7 +80,7 @@ export function TopBar() {
 						branch={workspace.worktree?.branch}
 						projectId={workspace.project?.id}
 					/>
-				)}
+				) : null}
 				{!isMac && <WindowControls />}
 			</div>
 		</div>

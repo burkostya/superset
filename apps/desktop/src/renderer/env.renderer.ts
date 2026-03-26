@@ -24,6 +24,7 @@ const envSchema = z.object({
 	NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
 	NEXT_PUBLIC_POSTHOG_HOST: z.string().default("https://us.i.posthog.com"),
 	SENTRY_DSN_DESKTOP: z.string().optional(),
+	SUPERSET_LOCAL_ONLY: z.string().optional(),
 });
 
 /**
@@ -46,15 +47,25 @@ const rawEnv = {
 		| string
 		| undefined,
 	SENTRY_DSN_DESKTOP: import.meta.env.SENTRY_DSN_DESKTOP as string | undefined,
+	SUPERSET_LOCAL_ONLY: process.env.SUPERSET_LOCAL_ONLY,
 };
 
 // Only allow skipping validation in development (never in production)
 const SKIP_ENV_VALIDATION =
 	process.env.NODE_ENV === "development" && !!process.env.SKIP_ENV_VALIDATION;
+// Packaged local-first builds cannot rely on the dev-only SKIP_ENV_VALIDATION path.
+// Keep a separate flag so system packagers can ship a local-only desktop without
+// patching renderer auth/org assumptions.
+const LOCAL_ONLY =
+	process.env.SUPERSET_LOCAL_ONLY === "1" ||
+	process.env.SUPERSET_LOCAL_ONLY === "true";
+const USE_MOCK_ORGANIZATION = SKIP_ENV_VALIDATION || LOCAL_ONLY;
 
 export const env = {
 	...(SKIP_ENV_VALIDATION
 		? (rawEnv as z.infer<typeof envSchema>)
 		: envSchema.parse(rawEnv)),
 	SKIP_ENV_VALIDATION,
+	LOCAL_ONLY,
+	USE_MOCK_ORGANIZATION,
 };

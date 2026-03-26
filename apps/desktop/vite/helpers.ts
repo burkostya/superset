@@ -37,6 +37,10 @@ const RESOURCES_TO_COPY = [
 		dest: resolve(__dirname, "..", devPath, "resources/browser-extension"),
 	},
 	{
+		src: resolve(__dirname, "..", resources, "build/icons"),
+		dest: resolve(__dirname, "..", devPath, "resources/build/icons"),
+	},
+	{
 		src: resolve(__dirname, "../../../packages/local-db/drizzle"),
 		dest: resolve(__dirname, "..", devPath, "resources/migrations"),
 	},

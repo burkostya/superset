@@ -44,6 +44,7 @@ The Nix shell must provide:
 - C/C++ build toolchain for native modules;
 - Linux Electron runtime libraries;
 - `SKIP_ENV_VALIDATION=1` for local-only startup;
+- `SUPERSET_LOCAL_ONLY=1` for packaged/unpackaged local-only desktop runs;
 - `ELECTRON_EXEC_PATH` pointing at the Nix-provided Electron runtime;
 - `LD_LIBRARY_PATH` covering the Linux Electron shared library set.
 
@@ -157,6 +158,9 @@ For a future Nix derivation:
 - prefer a native Nix package over an AppImage-first workflow;
 - keep Electron runtime alignment explicit and pinned to Electron 40;
 - ensure native modules are rebuilt against the same Electron runtime that will launch the app;
+- call the project-owned native rebuild entrypoint (`bun run rebuild:native-modules`) instead of keeping a second native module list in Nix;
+- stage the app from project output (`bun run prebuild && bun run stage:portable`) instead of duplicating runtime module copy lists in Nix;
+- prefer `SUPERSET_LOCAL_ONLY=1` over renderer-specific source patches when building a local-first package;
 - reuse the current desktop production build path where possible, but do not rely on generic system Electron selection.
 
 This packaging work is separate from the cloud-cut itself. A local-first desktop can still be correct even if the final Nix derivation is not yet implemented.

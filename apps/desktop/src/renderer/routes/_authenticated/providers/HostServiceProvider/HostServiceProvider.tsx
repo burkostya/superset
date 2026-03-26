@@ -35,7 +35,7 @@ export function HostServiceProvider({ children }: { children: ReactNode }) {
 	const collections = useCollections();
 	const utils = electronTrpc.useUtils();
 
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const activeOrganizationId = env.USE_MOCK_ORGANIZATION
 		? MOCK_ORG_ID
 		: (session?.session?.activeOrganizationId ?? null);
 
