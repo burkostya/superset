@@ -91,6 +91,10 @@ export default defineConfig({
 			"process.env.SUPERSET_WORKSPACE_NAME": defineEnv(
 				process.env.SUPERSET_WORKSPACE_NAME,
 			),
+			"process.env.SUPERSET_LOCAL_ONLY": defineEnv(
+				process.env.SUPERSET_LOCAL_ONLY,
+				"",
+			),
 		},
 
 		build: {
@@ -139,6 +143,10 @@ export default defineConfig({
 			"process.env.NODE_ENV": defineEnv(process.env.NODE_ENV, "production"),
 			"process.env.SKIP_ENV_VALIDATION": defineEnv(
 				process.env.SKIP_ENV_VALIDATION,
+				"",
+			),
+			"process.env.SUPERSET_LOCAL_ONLY": defineEnv(
+				process.env.SUPERSET_LOCAL_ONLY,
 				"",
 			),
 			__APP_VERSION__: defineEnv(version),
@@ -199,6 +207,10 @@ export default defineConfig({
 			"process.env.ELECTRIC_PORT": defineEnv(process.env.ELECTRIC_PORT),
 			"process.env.SUPERSET_WORKSPACE_NAME": defineEnv(
 				process.env.SUPERSET_WORKSPACE_NAME,
+			),
+			"process.env.SUPERSET_LOCAL_ONLY": defineEnv(
+				process.env.SUPERSET_LOCAL_ONLY,
+				"",
 			),
 		},
 

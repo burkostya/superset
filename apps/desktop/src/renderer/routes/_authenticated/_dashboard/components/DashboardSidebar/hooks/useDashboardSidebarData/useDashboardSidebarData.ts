@@ -27,7 +27,7 @@ export function useDashboardSidebarData() {
 	const { toggleProjectCollapsed } = useDashboardSidebarState();
 	const { data: deviceInfo } = electronTrpc.auth.getDeviceInfo.useQuery();
 	const pendingWorkspace = usePendingWorkspace();
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const activeOrganizationId = env.USE_MOCK_ORGANIZATION
 		? MOCK_ORG_ID
 		: (session?.session?.activeOrganizationId ?? null);
 	const activeHostService =

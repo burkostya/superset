@@ -15,6 +15,13 @@ export interface FontInfo {
 const REGISTERED_FONTS: FontInfo[] = navigator.platform.startsWith("Mac")
 	? [{ family: "SF Mono", category: "mono" }]
 	: [];
+const PLATFORM = navigator.userAgentData?.platform ?? navigator.platform ?? "";
+const IS_LINUX = /^Linux/i.test(PLATFORM);
+// queryLocalFonts has been observed to hang on Linux desktops; keep the fast
+// known-font path there and reserve local font enumeration for platforms where
+// it returns promptly.
+const SHOULD_QUERY_LOCAL_FONTS =
+	typeof window.queryLocalFonts === "function" && !IS_LINUX;
 
 const WELL_KNOWN_NERD: string[] = [
 	"MesloLGM Nerd Font",
@@ -127,67 +134,106 @@ function discoverSystemFonts(): FontInfo[] {
 }
 
 let cachedFonts: FontInfo[] | null = null;
+let pendingFontsPromise: Promise<FontInfo[]> | null = null;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timeout = window.setTimeout(() => {
+			reject(new Error(`Timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+
+		promise.then(
+			(value) => {
+				window.clearTimeout(timeout);
+				resolve(value);
+			},
+			(error) => {
+				window.clearTimeout(timeout);
+				reject(error);
+			},
+		);
+	});
+}
+
+async function loadFonts(): Promise<FontInfo[]> {
+	await document.fonts.ready;
+
+	const result: FontInfo[] = [];
+	const seen = new Set<string>();
+
+	for (const font of REGISTERED_FONTS) {
+		if (isFontAvailable(font.family)) {
+			result.push(font);
+			seen.add(font.family);
+		}
+	}
+
+	for (const font of discoverSystemFonts()) {
+		if (!seen.has(font.family)) {
+			seen.add(font.family);
+			result.push(font);
+		}
+	}
+
+	if (SHOULD_QUERY_LOCAL_FONTS) {
+		try {
+			const fontData = await withTimeout(window.queryLocalFonts!(), 3000);
+			for (const fd of fontData) {
+				if (seen.has(fd.family)) continue;
+				seen.add(fd.family);
+
+				let category = classifyFont(fd.family);
+				if (category === "other" && isMonospaceByMeasurement(fd.family)) {
+					category = "mono";
+				}
+				result.push({ family: fd.family, category });
+			}
+		} catch (err) {
+			console.warn("[useSystemFonts] queryLocalFonts failed:", err);
+		}
+	}
+
+	result.sort((a, b) => a.family.localeCompare(b.family));
+	return result;
+}
 
 export function useSystemFonts() {
 	const [fonts, setFonts] = useState<FontInfo[]>(cachedFonts ?? []);
 	const [isLoading, setIsLoading] = useState(cachedFonts === null);
 
 	useEffect(() => {
-		if (cachedFonts) return;
+		if (cachedFonts) {
+			setFonts(cachedFonts);
+			setIsLoading(false);
+			return;
+		}
 
 		let cancelled = false;
 
-		async function loadFonts() {
-			await document.fonts.ready;
-
-			const result: FontInfo[] = [];
-			const seen = new Set<string>();
-
-			// Add registered @font-face fonts only if they loaded successfully
-			for (const font of REGISTERED_FONTS) {
-				if (isFontAvailable(font.family)) {
-					result.push(font);
-					seen.add(font.family);
-				}
-			}
-
-			for (const font of discoverSystemFonts()) {
-				if (!seen.has(font.family)) {
-					seen.add(font.family);
-					result.push(font);
-				}
-			}
-
-			if (window.queryLocalFonts) {
-				try {
-					const fontData = await window.queryLocalFonts();
-					for (const fd of fontData) {
-						if (seen.has(fd.family)) continue;
-						seen.add(fd.family);
-
-						let category = classifyFont(fd.family);
-						if (category === "other" && isMonospaceByMeasurement(fd.family)) {
-							category = "mono";
-						}
-						result.push({ family: fd.family, category });
-					}
-				} catch (err) {
-					console.warn("[useSystemFonts] queryLocalFonts failed:", err);
-				}
-			}
-
-			result.sort((a, b) => a.family.localeCompare(b.family));
-
-			cachedFonts = result;
-			if (!cancelled) {
-				setFonts(result);
-				setIsLoading(false);
-			}
+		if (!pendingFontsPromise) {
+			// Coalesce concurrent mounts into one font scan so settings screens do not
+			// trigger multiple expensive enumerations in parallel.
+			pendingFontsPromise = loadFonts()
+				.then((result) => {
+					cachedFonts = result;
+					return result;
+				})
+				.finally(() => {
+					pendingFontsPromise = null;
+				});
 		}
 
-		loadFonts().catch((err) => {
-			console.warn("[useSystemFonts] Font loading failed:", err);
-		});
+		pendingFontsPromise
+			.then((result) => {
+				if (cancelled) return;
+				setFonts(result);
+				setIsLoading(false);
+			})
+			.catch((err) => {
+				if (cancelled) return;
+				setIsLoading(false);
+				console.warn("[useSystemFonts] Font loading failed:", err);
+			});
 		return () => {
 			cancelled = true;
 		};
