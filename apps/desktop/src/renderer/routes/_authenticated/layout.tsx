@@ -12,7 +12,10 @@ import { dragDropManager } from "renderer/lib/dnd";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { showWorkspaceAutoNameWarningToast } from "renderer/lib/workspaces/showWorkspaceAutoNameWarningToast";
 import { InitGitDialog } from "renderer/react-query/projects/InitGitDialog";
+import { AgentHooks } from "renderer/routes/_authenticated/components/AgentHooks";
 import { DashboardNewWorkspaceModal } from "renderer/routes/_authenticated/components/DashboardNewWorkspaceModal";
+import { CollectionsProvider } from "renderer/routes/_authenticated/providers/CollectionsProvider";
+import { HostServiceProvider } from "renderer/routes/_authenticated/providers/HostServiceProvider";
 import { WorkspaceInitEffects } from "renderer/screens/main/components/WorkspaceInitEffects";
 import { useHotkeysSync } from "renderer/stores/hotkeys";
 import { useSettingsStore } from "renderer/stores/settings-state";
@@ -106,7 +109,14 @@ function AuthenticatedLayout() {
 
 	return (
 		<DndProvider manager={dragDropManager}>
-			<Outlet />
+			{/* Shared data/providers live here so both regular desktop runs and
+			 portable/local-only packager builds see the same authenticated tree. */}
+			<CollectionsProvider>
+				<HostServiceProvider>
+					<AgentHooks />
+					<Outlet />
+				</HostServiceProvider>
+			</CollectionsProvider>
 			<WorkspaceInitEffects />
 			<NewWorkspaceModal />
 			<InitGitDialog />

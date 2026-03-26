@@ -40,7 +40,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 	const isV2CloudEnabled =
 		useFeatureFlagEnabled(FEATURE_FLAGS.V2_CLOUD) ?? false;
 	const [isSwitching, setIsSwitching] = useState(false);
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const activeOrganizationId = env.USE_MOCK_ORGANIZATION
 		? MOCK_ORG_ID
 		: session?.session?.activeOrganizationId;
 

@@ -111,3 +111,7 @@ export const requiredMaterializedNodeModules = [
 	"picomatch",
 	"node-addon-api",
 ];
+
+// Keep the native rebuild list in-repo so packagers do not have to mirror it in
+// external recipes next to the runtime copy list.
+export const nativeRebuildNodeModules = ["better-sqlite3", "node-pty"];

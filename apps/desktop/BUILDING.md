@@ -13,6 +13,9 @@ desktop-dev
 
 This follows the current `devenv` flake workflow and loads the Bun/Node/native desktop toolchain in local-only mode.
 
+For packaged or preview-style local-only runs, use `SUPERSET_LOCAL_ONLY=1`.
+Unlike `SKIP_ENV_VALIDATION`, this flag is supported outside development builds and is intended for local-first/system-packaged desktop runs.
+
 Without `devenv`:
 
 Run the dev server without env validation or auth:
@@ -52,3 +55,32 @@ ls -la release/*-linux.yml
 ```
 
 If both files exist, packaging produced the Linux artifact + updater metadata that `electron-updater` expects.
+
+# Portable system-Electron bundle
+
+For packagers that want to ship Superset with a system Electron runtime instead of `electron-builder` output:
+
+```bash
+bun run prebuild
+bun run stage:portable
+```
+
+If you need to rebuild native modules against a specific Electron/Node ABI from an external packager, use:
+
+```bash
+NODE_GYP=/path/to/node-gyp.js NODE_BINARY=node bun run rebuild:native-modules
+```
+
+This creates `apps/desktop/release/portable-app/` with:
+
+- `dist/` including preview/runtime resources under `dist/resources/`
+- `package.json`
+- runtime `node_modules/` required by the desktop main process
+
+The output is suitable for wrappers such as a Nix derivation that launches:
+
+```bash
+electron /path/to/portable-app
+```
+
+with an Electron runtime ABI-compatible with the app's pinned version.

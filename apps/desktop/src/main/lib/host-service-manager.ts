@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import * as childProcess from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { getProcessEnvWithShellPath } from "../../lib/trpc/routers/workspaces/utils/shell-env";
@@ -153,6 +154,18 @@ export class HostServiceManager {
 	private async buildHostServiceEnv(
 		organizationId: string,
 	): Promise<Record<string, string>> {
+		// Preview/system-Electron runs are not "packaged", but they still stage
+		// host migrations under dist/resources like the rest of the desktop runtime.
+		const previewHostMigrationsPath = path.join(
+			__dirname,
+			"../resources/host-migrations",
+		);
+		const hostMigrationsPath = app.isPackaged
+			? path.join(process.resourcesPath, "resources/host-migrations")
+			: existsSync(previewHostMigrationsPath)
+				? previewHostMigrationsPath
+				: path.join(app.getAppPath(), "../../packages/host-service/drizzle");
+
 		return getProcessEnvWithShellPath({
 			...(process.env as Record<string, string>),
 			ELECTRON_RUN_AS_NODE: "1",
@@ -165,9 +178,7 @@ export class HostServiceManager {
 				organizationId,
 				"host.db",
 			),
-			HOST_MIGRATIONS_PATH: app.isPackaged
-				? path.join(process.resourcesPath, "resources/host-migrations")
-				: path.join(app.getAppPath(), "../../packages/host-service/drizzle"),
+			HOST_MIGRATIONS_PATH: hostMigrationsPath,
 		});
 	}
 
