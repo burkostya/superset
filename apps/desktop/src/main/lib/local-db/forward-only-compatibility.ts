@@ -7,9 +7,7 @@ type SqliteCompatStatement<Result> = {
 };
 
 export type SqliteCompatDb = {
-	prepare<Result = unknown>(
-		source: string,
-	): SqliteCompatStatement<Result>;
+	prepare(source: string): SqliteCompatStatement<SqliteTableInfoRow>;
 	exec(source: string): unknown;
 };
 
@@ -20,10 +18,7 @@ type SchemaRepair = {
 };
 
 function listTableColumns(db: SqliteCompatDb, tableName: string): string[] {
-	return db
-		.prepare<SqliteTableInfoRow>(`PRAGMA table_info(\`${tableName}\`)`)
-		.all()
-		.map((column) => column.name);
+	return db.prepare(`PRAGMA table_info(\`${tableName}\`)`).all().map((column) => column.name);
 }
 
 function addColumnIfMissing(
