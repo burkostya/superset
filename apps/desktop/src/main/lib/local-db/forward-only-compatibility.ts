@@ -3,15 +3,13 @@ type SqliteTableInfoRow = {
 };
 
 type SqliteCompatStatement<Result> = {
-	all(): Result[];
+	all(...params: unknown[]): Result[];
 };
 
 export type SqliteCompatDb = {
-	prepare<BindParameters extends unknown[] | {} = unknown[], Result = unknown>(
+	prepare<Result = unknown>(
 		source: string,
-	): BindParameters extends unknown[]
-		? SqliteCompatStatement<Result>
-		: SqliteCompatStatement<Result>;
+	): SqliteCompatStatement<Result>;
 	exec(source: string): unknown;
 };
 
@@ -23,9 +21,7 @@ type SchemaRepair = {
 
 function listTableColumns(db: SqliteCompatDb, tableName: string): string[] {
 	return db
-		.prepare<unknown[], SqliteTableInfoRow>(
-			`PRAGMA table_info(\`${tableName}\`)`,
-		)
+		.prepare<SqliteTableInfoRow>(`PRAGMA table_info(\`${tableName}\`)`)
 		.all()
 		.map((column) => column.name);
 }
@@ -74,4 +70,3 @@ export function ensureLocalDbForwardOnlyCompatibility(
 		);
 	}
 }
-
