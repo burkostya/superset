@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { getBuiltinAgentDefinition } from "@superset/shared/agent-catalog";
 import {
 	createOverrideEnvelopeWithPatch,
+	removeAgentPresetOverride,
 	resolveAgentConfigs,
 } from "./agent-settings";
 
@@ -57,6 +58,33 @@ describe("resolveAgentConfigs", () => {
 			label: "Pi",
 			command: "pi",
 			promptCommand: "pi",
+			enabled: true,
+		});
+	});
+
+	test("includes custom terminal agents after built-ins", () => {
+		const presets = resolveAgentConfigs({
+			customDefinitions: [
+				{
+					id: "custom:codex-work",
+					kind: "terminal",
+					label: "Codex Work",
+					command: "codex-work",
+					promptCommand: "codex-work --",
+					taskPromptTemplate: "Implement {{slug}}",
+				},
+			],
+		});
+
+		const custom = presets.find((preset) => preset.id === "custom:codex-work");
+		expect(custom).toMatchObject({
+			id: "custom:codex-work",
+			source: "user",
+			kind: "terminal",
+			label: "Codex Work",
+			command: "codex-work",
+			promptCommand: "codex-work --",
+			taskPromptTemplate: "Implement {{slug}}",
 			enabled: true,
 		});
 	});
@@ -117,6 +145,35 @@ describe("createOverrideEnvelopeWithPatch", () => {
 					enabled: false,
 					command: "claude-custom",
 					label: "Claude Team",
+				},
+			],
+		});
+	});
+
+	test("removes overrides for deleted custom agents", () => {
+		expect(
+			removeAgentPresetOverride({
+				currentOverrides: {
+					version: 1,
+					presets: [
+						{
+							id: "custom:codex-work",
+							label: "Codex Work",
+						},
+						{
+							id: "claude",
+							enabled: false,
+						},
+					],
+				},
+				id: "custom:codex-work",
+			}),
+		).toEqual({
+			version: 1,
+			presets: [
+				{
+					id: "claude",
+					enabled: false,
 				},
 			],
 		});

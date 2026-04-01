@@ -476,6 +476,16 @@ export function resetAgentPresetOverride({
 	};
 }
 
+export function removeAgentPresetOverride({
+	currentOverrides,
+	id,
+}: {
+	currentOverrides: AgentPresetOverrideEnvelope | null | undefined;
+	id: AgentDefinitionId;
+}): AgentPresetOverrideEnvelope {
+	return resetAgentPresetOverride({ currentOverrides, id });
+}
+
 export function resetAllAgentPresetOverrides(): AgentPresetOverrideEnvelope {
 	return EMPTY_AGENT_PRESET_OVERRIDE_ENVELOPE;
 }

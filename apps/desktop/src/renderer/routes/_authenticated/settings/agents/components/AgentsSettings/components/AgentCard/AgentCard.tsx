@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@superset/ui/card";
 import { Collapsible, CollapsibleContent } from "@superset/ui/collapsible";
 import { toast } from "@superset/ui/sonner";
+import { alert } from "@superset/ui/atoms/Alert";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import type {
@@ -33,6 +34,11 @@ export function AgentCard({
 		},
 	});
 	const resetPreset = electronTrpc.settings.resetAgentPreset.useMutation({
+		onSuccess: async () => {
+			await utils.settings.getAgentPresets.invalidate();
+		},
+	});
+	const deleteCustomAgent = electronTrpc.settings.deleteCustomAgent.useMutation({
 		onSuccess: async () => {
 			await utils.settings.getAgentPresets.invalidate();
 		},
@@ -183,6 +189,27 @@ export function AgentCard({
 		}
 	};
 
+	const handleDelete = () => {
+		alert.destructive({
+			title: `Delete ${preset.label}?`,
+			description:
+				"This removes the custom agent and clears any saved overrides for it.",
+			confirmText: "Delete Agent",
+			onConfirm: async () => {
+				try {
+					await deleteCustomAgent.mutateAsync({ id: preset.id });
+					toast.success(`${preset.label} deleted`);
+				} catch (error) {
+					toast.error(
+						error instanceof Error
+							? error.message
+							: "Failed to delete agent",
+					);
+				}
+			},
+		});
+	};
+
 	return (
 		<Card className="p-0">
 			<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
@@ -215,8 +242,14 @@ export function AgentCard({
 						/>
 					</CardContent>
 					<AgentCardActions
-						isResetting={resetPreset.isPending || updatePreset.isPending}
+						isPending={
+							resetPreset.isPending ||
+							updatePreset.isPending ||
+							deleteCustomAgent.isPending
+						}
+						canDelete={preset.source === "user"}
 						onReset={handleReset}
+						onDelete={handleDelete}
 					/>
 				</CollapsibleContent>
 			</Collapsible>

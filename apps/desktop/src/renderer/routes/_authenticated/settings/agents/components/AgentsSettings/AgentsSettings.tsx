@@ -1,3 +1,5 @@
+import { Button } from "@superset/ui/button";
+import { useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	isItemVisible,
@@ -5,6 +7,7 @@ import {
 	type SettingItemId,
 } from "../../../utils/settings-search";
 import { AgentCard } from "./components/AgentCard";
+import { AddCustomAgentDialog } from "./components/AddCustomAgentDialog";
 
 interface AgentsSettingsProps {
 	visibleItems?: SettingItemId[] | null;
@@ -13,6 +16,7 @@ interface AgentsSettingsProps {
 export function AgentsSettings({ visibleItems }: AgentsSettingsProps) {
 	const { data: presets = [], isLoading } =
 		electronTrpc.settings.getAgentPresets.useQuery();
+	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
 	const showEnabled = isItemVisible(
 		SETTING_ITEM_ID.AGENTS_ENABLED,
@@ -29,12 +33,20 @@ export function AgentsSettings({ visibleItems }: AgentsSettingsProps) {
 
 	return (
 		<div className="p-6 max-w-5xl w-full">
-			<div className="mb-8">
-				<h2 className="text-xl font-semibold">Agents</h2>
-				<p className="text-sm text-muted-foreground mt-1">
-					Configure which agents appear in launchers and how their launches are
-					built.
-				</p>
+			<div className="mb-8 flex items-start justify-between gap-4">
+				<div>
+					<h2 className="text-xl font-semibold">Agents</h2>
+					<p className="text-sm text-muted-foreground mt-1">
+						Configure which agents appear in launchers and how their launches
+						are built.
+					</p>
+				</div>
+				<Button
+					onClick={() => setIsAddDialogOpen(true)}
+					disabled={isLoading || !presets.some((preset) => preset.kind === "terminal")}
+				>
+					Add Agent
+				</Button>
 			</div>
 
 			{isLoading ? (
@@ -54,6 +66,11 @@ export function AgentsSettings({ visibleItems }: AgentsSettingsProps) {
 					))}
 				</div>
 			)}
+			<AddCustomAgentDialog
+				open={isAddDialogOpen}
+				onOpenChange={setIsAddDialogOpen}
+				agents={presets}
+			/>
 		</div>
 	);
 }

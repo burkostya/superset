@@ -39,6 +39,7 @@ import {
 	type AgentDefinitionId,
 	createOverrideEnvelopeWithPatch,
 	getAgentDefinitionById,
+	removeAgentPresetOverride,
 	readAgentPresetOverrides,
 	resetAgentPresetOverride,
 	resolveAgentConfigs,
@@ -47,6 +48,8 @@ import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { getGitAuthorName, getGitHubUsername } from "../workspaces/utils/git";
 import {
+	createCustomAgentInputSchema,
+	normalizeCustomAgentInput,
 	normalizeAgentPresetPatch,
 	updateAgentPresetInputSchema,
 } from "./agent-preset-router.utils";
@@ -136,6 +139,34 @@ function saveAgentPresetOverrides(overrides: AgentPresetOverrideEnvelope) {
 		.run();
 }
 
+function saveAgentCustomDefinitions(definitions: AgentCustomDefinition[]) {
+	localDb
+		.insert(settings)
+		.values({
+			id: 1,
+			agentCustomDefinitions: definitions,
+		})
+		.onConflictDoUpdate({
+			target: settings.id,
+			set: { agentCustomDefinitions: definitions },
+		})
+		.run();
+}
+
+function slugifyAgentLabel(label: string): string {
+	const slug = label
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return slug || "agent";
+}
+
+function createCustomAgentId(label: string): `custom:${string}` {
+	const shortId = crypto.randomUUID().slice(0, 8);
+	return `custom:${slugifyAgentLabel(label)}-${shortId}`;
+}
+
 function getResolvedAgentPresets() {
 	return resolveAgentConfigs({
 		customDefinitions: readRawAgentCustomDefinitions(),
@@ -204,6 +235,50 @@ export const createSettingsRouter = () => {
 			return getNormalizedTerminalPresets();
 		}),
 		getAgentPresets: publicProcedure.query(() => getResolvedAgentPresets()),
+		createCustomAgent: publicProcedure
+			.input(createCustomAgentInputSchema)
+			.mutation(({ input }) => {
+				const normalized = normalizeCustomAgentInput(input);
+				const nextDefinition: AgentCustomDefinition = {
+					id: createCustomAgentId(normalized.label),
+					kind: "terminal",
+					...normalized,
+				};
+
+				saveAgentCustomDefinitions([
+					...readRawAgentCustomDefinitions(),
+					nextDefinition,
+				]);
+
+				return getResolvedAgentPresets().find(
+					(preset) => preset.id === nextDefinition.id,
+				);
+			}),
+		deleteCustomAgent: publicProcedure
+			.input(z.object({ id: z.string().regex(/^custom:/) }))
+			.mutation(({ input }) => {
+				const currentDefinitions = readRawAgentCustomDefinitions();
+				const nextDefinitions = currentDefinitions.filter(
+					(definition) => definition.id !== input.id,
+				);
+
+				if (nextDefinitions.length === currentDefinitions.length) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: `Custom agent ${input.id} not found`,
+					});
+				}
+
+				saveAgentCustomDefinitions(nextDefinitions);
+				saveAgentPresetOverrides(
+					removeAgentPresetOverride({
+						currentOverrides: readRawAgentPresetOverrides(),
+						id: input.id as AgentDefinitionId,
+					}),
+				);
+
+				return { success: true };
+			}),
 		updateAgentPreset: publicProcedure
 			.input(updateAgentPresetInputSchema)
 			.mutation(({ input }) => {

@@ -1,18 +1,21 @@
 import { Button } from "@superset/ui/button";
 import { CardFooter } from "@superset/ui/card";
-
-interface AgentCardActionsProps {
-	isResetting: boolean;
-	onReset: () => void;
-}
+import type { AgentCardActionsProps } from "../../agent-card.types";
 
 export function AgentCardActions({
-	isResetting,
+	isPending,
+	canDelete,
 	onReset,
+	onDelete,
 }: AgentCardActionsProps) {
 	return (
-		<CardFooter className="mt-2 justify-end">
-			<Button variant="outline" onClick={onReset} disabled={isResetting}>
+		<CardFooter className="mt-2 justify-end gap-2">
+			{canDelete && (
+				<Button variant="destructive" onClick={onDelete} disabled={isPending}>
+					Delete Agent
+				</Button>
+			)}
+			<Button variant="outline" onClick={onReset} disabled={isPending}>
 				Reset to Defaults
 			</Button>
 		</CardFooter>

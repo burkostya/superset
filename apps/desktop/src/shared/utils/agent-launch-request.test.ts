@@ -167,6 +167,45 @@ describe("buildTaskAgentLaunchRequest", () => {
 		});
 	});
 
+	test("builds terminal launches for custom agents", () => {
+		const configsById = indexResolvedAgentConfigs(
+			resolveAgentConfigs({
+				customDefinitions: [
+					{
+						id: "custom:codex-work",
+						kind: "terminal",
+						label: "Codex Work",
+						command: "codex-work",
+						promptCommand: "codex-work --",
+						promptCommandSuffix: "--dangerously-bypass-approvals-and-sandbox",
+						taskPromptTemplate: "Handle {{slug}}",
+					},
+				],
+			}),
+		);
+		const request = buildTaskAgentLaunchRequest({
+			workspaceId: "workspace-1",
+			source: "open-in-workspace",
+			selectedAgent: "custom:codex-work",
+			task: TASK,
+			autoRun: true,
+			configsById,
+		});
+
+		expect(request).toMatchObject({
+			kind: "terminal",
+			agentType: "custom:codex-work",
+			terminal: {
+				taskPromptContent: "Handle demo-task",
+				taskPromptFileName: "task-demo-task.md",
+				autoExecute: true,
+			},
+		});
+		expect(request?.kind === "terminal" ? request.terminal.command : "").toContain(
+			"codex-work --",
+		);
+	});
+
 	test("rejects disabled agents", () => {
 		const configsById = indexResolvedAgentConfigs(
 			resolveAgentConfigs({

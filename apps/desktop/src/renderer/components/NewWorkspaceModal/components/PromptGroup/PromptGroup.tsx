@@ -64,6 +64,7 @@ import { buildPromptAgentLaunchRequest } from "shared/utils/agent-launch-request
 import {
 	type AgentDefinitionId,
 	getEnabledAgentConfigs,
+	getFallbackAgentId,
 	indexResolvedAgentConfigs,
 } from "shared/utils/agent-settings";
 import { sanitizeBranchNameWithMaxLength } from "shared/utils/branch";
@@ -582,11 +583,15 @@ function PromptGroupInner({
 		() => enabledAgentPresets.map((preset) => preset.id),
 		[enabledAgentPresets],
 	);
+	const fallbackAgentId = useMemo(
+		() => getFallbackAgentId(agentPresets),
+		[agentPresets],
+	);
 	const { selectedAgent, setSelectedAgent } =
 		useAgentLaunchPreferences<WorkspaceCreateAgent>({
 			agentStorageKey: AGENT_STORAGE_KEY,
-			defaultAgent: "claude",
-			fallbackAgent: "none",
+			defaultAgent: fallbackAgentId ?? "none",
+			fallbackAgent: fallbackAgentId ?? "none",
 			validAgents: ["none", ...selectableAgentIds],
 			agentsReady: agentPresetsQuery.isFetched,
 		});

@@ -7,6 +7,13 @@ export interface AgentCardProps {
 	showTaskPrompts: boolean;
 }
 
+export interface AgentCardActionsProps {
+	isPending: boolean;
+	canDelete: boolean;
+	onReset: () => void;
+	onDelete: () => void;
+}
+
 export type AgentEditableField =
 	| "label"
 	| "description"
