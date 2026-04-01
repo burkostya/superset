@@ -1,7 +1,15 @@
+export interface WorkspaceCopyRule {
+	source: string;
+	target?: string;
+	optional?: boolean;
+	overwrite?: boolean;
+}
+
 export interface SetupConfig {
 	setup?: string[];
 	teardown?: string[];
 	run?: string[];
+	copy?: WorkspaceCopyRule[];
 }
 
 export interface LocalScriptMerge {

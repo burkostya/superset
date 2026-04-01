@@ -1,6 +1,21 @@
-import { cpSync, existsSync, readFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import {
+	dirname,
+	isAbsolute,
+	join,
+	normalize,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 import {
 	CONFIG_FILE_NAME,
 	LOCAL_CONFIG_FILE_NAME,
@@ -8,7 +23,86 @@ import {
 	PROJECTS_DIR_NAME,
 	SUPERSET_DIR_NAME,
 } from "shared/constants";
-import type { LocalSetupConfig, SetupConfig } from "shared/types";
+import type {
+	LocalSetupConfig,
+	SetupConfig,
+	WorkspaceCopyRule,
+} from "shared/types";
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function validateCopyRule(rule: unknown): WorkspaceCopyRule {
+	if (typeof rule !== "object" || rule === null || Array.isArray(rule)) {
+		throw new Error("'copy' entries must be objects");
+	}
+
+	const parsed = rule as Record<string, unknown>;
+	if (typeof parsed.source !== "string" || parsed.source.trim().length === 0) {
+		throw new Error("'copy[].source' must be a non-empty string");
+	}
+	if (
+		parsed.target !== undefined &&
+		(typeof parsed.target !== "string" || parsed.target.trim().length === 0)
+	) {
+		throw new Error("'copy[].target' must be a non-empty string when provided");
+	}
+	if (
+		parsed.optional !== undefined &&
+		typeof parsed.optional !== "boolean"
+	) {
+		throw new Error("'copy[].optional' must be a boolean");
+	}
+	if (
+		parsed.overwrite !== undefined &&
+		typeof parsed.overwrite !== "boolean"
+	) {
+		throw new Error("'copy[].overwrite' must be a boolean");
+	}
+
+	return {
+		source: parsed.source.trim(),
+		target: typeof parsed.target === "string" ? parsed.target.trim() : undefined,
+		optional: parsed.optional === true ? true : undefined,
+		overwrite: parsed.overwrite === true ? true : undefined,
+	};
+}
+
+function normalizeRelativePath(value: string, label: string): string {
+	const trimmed = value.trim();
+	if (trimmed.length === 0) {
+		throw new Error(`'${label}' must not be empty`);
+	}
+	if (isAbsolute(trimmed)) {
+		throw new Error(`'${label}' must be a relative path`);
+	}
+
+	const normalized = normalize(trimmed);
+	if (normalized === ".." || normalized.startsWith(`..${sep}`)) {
+		throw new Error(`'${label}' must stay within the project`);
+	}
+
+	return normalized;
+}
+
+function resolveWithinRoot(
+	rootPath: string,
+	relativePath: string,
+	label: string,
+): string {
+	const safeRelativePath = normalizeRelativePath(relativePath, label);
+	const absolutePath = resolve(rootPath, safeRelativePath);
+	const relativeToRoot = relative(rootPath, absolutePath);
+	if (
+		relativeToRoot === ".." ||
+		relativeToRoot.startsWith(`..${sep}`) ||
+		isAbsolute(relativeToRoot)
+	) {
+		throw new Error(`'${label}' must stay within the project`);
+	}
+	return absolutePath;
+}
 
 /**
  * Worktrees don't include gitignored files, so copy .superset from main repo
@@ -32,6 +126,58 @@ export function copySupersetConfigToWorktree(
 	}
 }
 
+export function copyProjectEntriesToWorktree(
+	mainRepoPath: string,
+	worktreePath: string,
+	copyRules: WorkspaceCopyRule[] | undefined,
+): void {
+	for (const rule of copyRules ?? []) {
+		const sourcePath = resolveWithinRoot(
+			mainRepoPath,
+			rule.source,
+			`copy source "${rule.source}"`,
+		);
+		const targetRelativePath = rule.target?.trim() || rule.source;
+		const targetPath = resolveWithinRoot(
+			worktreePath,
+			targetRelativePath,
+			`copy target "${targetRelativePath}"`,
+		);
+
+		if (!existsSync(sourcePath)) {
+			if (rule.optional) {
+				console.log(
+					`[workspace-copy] Skipping optional missing source: ${rule.source}`,
+				);
+				continue;
+			}
+
+			throw new Error(`Copy source not found: ${rule.source}`);
+		}
+
+		if (existsSync(targetPath)) {
+			if (!rule.overwrite) {
+				console.log(
+					`[workspace-copy] Skipping existing target: ${targetRelativePath}`,
+				);
+				continue;
+			}
+
+			rmSync(targetPath, { recursive: true, force: true });
+		}
+
+		mkdirSync(dirname(targetPath), { recursive: true });
+
+		const sourceStats = lstatSync(sourcePath);
+		if (sourceStats.isDirectory()) {
+			cpSync(sourcePath, targetPath, { recursive: true });
+			continue;
+		}
+
+		cpSync(sourcePath, targetPath);
+	}
+}
+
 function readConfigFile(configPath: string): SetupConfig | null {
 	if (!existsSync(configPath)) {
 		return null;
@@ -41,16 +187,23 @@ function readConfigFile(configPath: string): SetupConfig | null {
 		const content = readFileSync(configPath, "utf-8");
 		const parsed = JSON.parse(content) as SetupConfig;
 
-		if (parsed.setup && !Array.isArray(parsed.setup)) {
+		if (parsed.setup && !isStringArray(parsed.setup)) {
 			throw new Error("'setup' field must be an array of strings");
 		}
 
-		if (parsed.teardown && !Array.isArray(parsed.teardown)) {
+		if (parsed.teardown && !isStringArray(parsed.teardown)) {
 			throw new Error("'teardown' field must be an array of strings");
 		}
 
-		if (parsed.run && !Array.isArray(parsed.run)) {
+		if (parsed.run && !isStringArray(parsed.run)) {
 			throw new Error("'run' field must be an array of strings");
+		}
+
+		if (parsed.copy !== undefined) {
+			if (!Array.isArray(parsed.copy)) {
+				throw new Error("'copy' field must be an array");
+			}
+			parsed.copy = parsed.copy.map(validateCopyRule);
 		}
 
 		return parsed;
@@ -124,13 +277,14 @@ function mergeBaseConfigs(
 		setup: override.setup ?? base.setup,
 		teardown: override.teardown ?? base.teardown,
 		run: override.run ?? base.run,
+		copy: override.copy ?? base.copy,
 	};
 }
 
 /**
  * Merge a base config with a local config overlay.
  *
- * For each key (setup, teardown):
+ * For each script key (setup, teardown, run):
  *   - local is array       → override (replace base entirely)
  *   - local is {before,after} → merge: [...before, ...base, ...after]
  *   - local is undefined   → passthrough (use base)
@@ -169,7 +323,9 @@ export function mergeConfigs(
  *
  * After resolving the base config, a local overlay is applied if
  * `.superset/config.local.json` exists in the workspace (worktree or main repo).
- * The local config can prepend (before), append (after), or override each key.
+ * The local config can prepend (before), append (after), or override each
+ * script key. The top-level `copy` field is resolved only from the winning
+ * base config and is not merged via config.local.json.
  */
 export function loadSetupConfig({
 	mainRepoPath,

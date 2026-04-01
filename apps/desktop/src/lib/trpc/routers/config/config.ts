@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { projects, type SelectProject } from "@superset/local-db";
 import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
-import type { SetupAction, SetupDetectionResult } from "shared/types/config";
+import { CONFIG_TEMPLATE } from "shared/constants";
+import type {
+	SetupAction,
+	SetupDetectionResult,
+	WorkspaceCopyRule,
+} from "shared/types/config";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { loadSetupConfig } from "../workspaces/utils/setup";
@@ -31,15 +36,18 @@ function hasConfiguredScripts(
 				(s): s is string => typeof s === "string" && s.trim().length > 0,
 			)
 		: [];
-	return setup.length > 0 || teardown.length > 0 || run.length > 0;
+	const copy = Array.isArray(config?.copy)
+		? config.copy.filter(
+				(rule) => typeof rule.source === "string" && rule.source.trim().length > 0,
+			)
+		: [];
+	return (
+		setup.length > 0 ||
+		teardown.length > 0 ||
+		run.length > 0 ||
+		copy.length > 0
+	);
 }
-
-const CONFIG_TEMPLATE = `{
-  "setup": [],
-  "teardown": [],
-  "run": []
-}
-`;
 
 async function fileExists(path: string): Promise<boolean> {
 	try {
@@ -457,6 +465,16 @@ export const createConfigRouter = () => {
 					setup: z.array(z.string()),
 					teardown: z.array(z.string()),
 					run: z.array(z.string()).optional(),
+					copy: z
+						.array(
+							z.object({
+								source: z.string().min(1),
+								target: z.string().min(1).optional(),
+								optional: z.boolean().optional(),
+								overwrite: z.boolean().optional(),
+							}),
+						)
+						.optional(),
 				}),
 			)
 			.mutation(({ input }) => {
@@ -490,6 +508,9 @@ export const createConfigRouter = () => {
 					setup: input.setup,
 					teardown: input.teardown,
 					...(input.run !== undefined && { run: input.run }),
+					...(input.copy !== undefined && {
+						copy: input.copy satisfies WorkspaceCopyRule[],
+					}),
 				};
 
 				try {

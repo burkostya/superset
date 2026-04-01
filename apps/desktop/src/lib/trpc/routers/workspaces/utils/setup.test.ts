@@ -1,9 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROJECTS_DIR_NAME, SUPERSET_DIR_NAME } from "shared/constants";
-import { loadSetupConfig, mergeConfigs } from "./setup";
+import {
+	copyProjectEntriesToWorktree,
+	loadSetupConfig,
+	mergeConfigs,
+} from "./setup";
 
 const TEST_DIR = join(tmpdir(), `superset-test-setup-${process.pid}`);
 const MAIN_REPO = join(TEST_DIR, "main-repo");
@@ -40,6 +50,7 @@ describe("loadSetupConfig", () => {
 	test("loads valid setup config from main repo", () => {
 		const setupConfig = {
 			setup: ["npm install", "npm run build"],
+			copy: [{ source: ".env", optional: true }],
 		};
 
 		writeFileSync(
@@ -65,6 +76,26 @@ describe("loadSetupConfig", () => {
 		writeFileSync(
 			join(MAIN_REPO, ".superset", "config.json"),
 			JSON.stringify({ setup: "not-an-array" }),
+		);
+
+		const config = loadSetupConfig({ mainRepoPath: MAIN_REPO });
+		expect(config).toBeNull();
+	});
+
+	test("validates copy field must be an array", () => {
+		writeFileSync(
+			join(MAIN_REPO, ".superset", "config.json"),
+			JSON.stringify({ copy: "not-an-array" }),
+		);
+
+		const config = loadSetupConfig({ mainRepoPath: MAIN_REPO });
+		expect(config).toBeNull();
+	});
+
+	test("validates copy entries", () => {
+		writeFileSync(
+			join(MAIN_REPO, ".superset", "config.json"),
+			JSON.stringify({ copy: [{ source: "" }] }),
 		);
 
 		const config = loadSetupConfig({ mainRepoPath: MAIN_REPO });
@@ -99,6 +130,7 @@ describe("loadSetupConfig", () => {
 			JSON.stringify({
 				setup: ["./.superset/setup.sh"],
 				run: ["bun dev"],
+				copy: [{ source: ".env", optional: true }],
 			}),
 		);
 
@@ -117,6 +149,7 @@ describe("loadSetupConfig", () => {
 		expect(config).toEqual({
 			setup: ["scripts/setup-worktree.sh"],
 			run: ["bun dev"],
+			copy: [{ source: ".env", optional: true }],
 		});
 	});
 
@@ -165,6 +198,7 @@ describe("loadSetupConfig", () => {
 			JSON.stringify({
 				setup: ["npm install"],
 				run: ["bun dev"],
+				copy: [{ source: ".env" }],
 			}),
 		);
 
@@ -183,6 +217,7 @@ describe("loadSetupConfig", () => {
 		expect(config).toEqual({
 			setup: ["custom-setup.sh"],
 			run: ["bun dev"],
+			copy: [{ source: ".env" }],
 		});
 	});
 
@@ -681,5 +716,117 @@ describe("run config", () => {
 
 		const config = loadSetupConfig({ mainRepoPath: MAIN_REPO });
 		expect(config?.run).toEqual(["export DEBUG=1", "npm run dev"]);
+	});
+});
+
+describe("copyProjectEntriesToWorktree", () => {
+	const workspacePath = join(TEST_DIR, "copy-worktree");
+
+	beforeEach(() => {
+		mkdirSync(MAIN_REPO, { recursive: true });
+		mkdirSync(workspacePath, { recursive: true });
+	});
+
+	afterEach(() => {
+		if (existsSync(TEST_DIR)) {
+			rmSync(TEST_DIR, { recursive: true, force: true });
+		}
+	});
+
+	test("copies a file to the same relative path when target is omitted", () => {
+		writeFileSync(join(MAIN_REPO, ".env"), "TOKEN=abc\n");
+
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".env" },
+		]);
+
+		expect(readFileSync(join(workspacePath, ".env"), "utf-8")).toBe(
+			"TOKEN=abc\n",
+		);
+	});
+
+	test("copies a file to a custom target", () => {
+		writeFileSync(join(MAIN_REPO, ".env.example"), "TOKEN=abc\n");
+
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".env.example", target: ".env" },
+		]);
+
+		expect(readFileSync(join(workspacePath, ".env"), "utf-8")).toBe("TOKEN=abc\n");
+	});
+
+	test("copies directories recursively", () => {
+		mkdirSync(join(MAIN_REPO, ".cursor"), { recursive: true });
+		writeFileSync(join(MAIN_REPO, ".cursor", "mcp.json"), '{"ok":true}');
+
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".cursor" },
+		]);
+
+		expect(
+			readFileSync(join(workspacePath, ".cursor", "mcp.json"), "utf-8"),
+		).toBe('{"ok":true}');
+	});
+
+	test("skips optional missing sources", () => {
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".env", optional: true },
+		]);
+
+		expect(existsSync(join(workspacePath, ".env"))).toBe(false);
+	});
+
+	test("throws for missing required sources", () => {
+		expect(() =>
+			copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+				{ source: ".env" },
+			]),
+		).toThrow("Copy source not found: .env");
+	});
+
+	test("skips existing targets when overwrite is false", () => {
+		writeFileSync(join(MAIN_REPO, ".env"), "TOKEN=source\n");
+		writeFileSync(join(workspacePath, ".env"), "TOKEN=workspace\n");
+
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".env" },
+		]);
+
+		expect(readFileSync(join(workspacePath, ".env"), "utf-8")).toBe(
+			"TOKEN=workspace\n",
+		);
+	});
+
+	test("replaces existing targets when overwrite is true", () => {
+		writeFileSync(join(MAIN_REPO, ".env"), "TOKEN=source\n");
+		writeFileSync(join(workspacePath, ".env"), "TOKEN=workspace\n");
+
+		copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+			{ source: ".env", overwrite: true },
+		]);
+
+		expect(readFileSync(join(workspacePath, ".env"), "utf-8")).toBe(
+			"TOKEN=source\n",
+		);
+	});
+
+	test("rejects source paths outside the project", () => {
+		writeFileSync(join(MAIN_REPO, ".env"), "TOKEN=source\n");
+
+		expect(() =>
+			copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+				{ source: "../.env" },
+			]),
+		).toThrow("must stay within the project");
+	});
+
+	test("rejects target paths outside the workspace", () => {
+		writeFileSync(join(MAIN_REPO, ".env"), "TOKEN=source\n");
+
+		expect(() =>
+			copyProjectEntriesToWorktree(MAIN_REPO, workspacePath, [
+				{ source: ".env", target: "../.env" },
+			]),
+		).toThrow("must stay within the project");
 	});
 });

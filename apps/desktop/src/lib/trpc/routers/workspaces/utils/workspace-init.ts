@@ -18,7 +18,11 @@ import {
 	removeWorktree,
 	sanitizeGitError,
 } from "./git";
-import { copySupersetConfigToWorktree } from "./setup";
+import {
+	copyProjectEntriesToWorktree,
+	copySupersetConfigToWorktree,
+	loadSetupConfig,
+} from "./setup";
 
 export interface WorkspaceInitParams {
 	workspaceId: string;
@@ -144,6 +148,15 @@ export async function initializeWorkspaceWorktree({
 				"Copying configuration...",
 			);
 			copySupersetConfigToWorktree(mainRepoPath, worktreePath);
+			copyProjectEntriesToWorktree(
+				mainRepoPath,
+				worktreePath,
+				loadSetupConfig({
+					mainRepoPath,
+					worktreePath,
+					projectId,
+				})?.copy,
+			);
 
 			if (manager.isCancellationRequested(workspaceId)) {
 				try {
@@ -489,6 +502,15 @@ export async function initializeWorkspaceWorktree({
 			"Copying configuration...",
 		);
 		copySupersetConfigToWorktree(mainRepoPath, worktreePath);
+		copyProjectEntriesToWorktree(
+			mainRepoPath,
+			worktreePath,
+			loadSetupConfig({
+				mainRepoPath,
+				worktreePath,
+				projectId,
+			})?.copy,
+		);
 
 		if (manager.isCancellationRequested(workspaceId)) {
 			try {

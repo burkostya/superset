@@ -1,39 +1,25 @@
 import { Button } from "@superset/ui/button";
+import { Input } from "@superset/ui/input";
+import { Label } from "@superset/ui/label";
+import { Switch } from "@superset/ui/switch";
 import { cn } from "@superset/ui/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	HiArrowTopRightOnSquare,
 	HiCheckCircle,
 	HiDocumentArrowUp,
+	HiPlus,
+	HiTrash,
 } from "react-icons/hi2";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { invalidateProjectScriptQueries } from "renderer/lib/project-scripts";
 import { EXTERNAL_LINKS } from "shared/constants";
+import type { WorkspaceCopyRule } from "shared/types/config";
+import { buildCopyPayload, parseContentFromConfig } from "./utils";
 
 interface ScriptsEditorProps {
 	projectId: string;
 	className?: string;
-}
-
-function parseContentFromConfig(content: string | null): {
-	setup: string;
-	teardown: string;
-	run: string;
-} {
-	if (!content) {
-		return { setup: "", teardown: "", run: "" };
-	}
-
-	try {
-		const parsed = JSON.parse(content);
-		return {
-			setup: (parsed.setup ?? []).join("\n"),
-			teardown: (parsed.teardown ?? []).join("\n"),
-			run: (parsed.run ?? []).join("\n"),
-		};
-	} catch {
-		return { setup: "", teardown: "", run: "" };
-	}
 }
 
 interface ScriptTextareaProps {
@@ -169,6 +155,91 @@ function ScriptTextarea({
 
 type SaveStatus = "idle" | "saving" | "saved";
 
+const EMPTY_COPY_RULE: WorkspaceCopyRule = {
+	source: "",
+	target: "",
+	optional: false,
+	overwrite: false,
+};
+
+interface CopyRuleRowProps {
+	rule: WorkspaceCopyRule;
+	isOnlyRow: boolean;
+	onChange: (nextRule: WorkspaceCopyRule) => void;
+	onRemove: () => void;
+	onBlur: () => void;
+}
+
+function CopyRuleRow({
+	rule,
+	isOnlyRow,
+	onChange,
+	onRemove,
+	onBlur,
+}: CopyRuleRowProps) {
+	return (
+		<div className="rounded-lg border border-border p-3 space-y-3">
+			<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+				<div className="space-y-1.5">
+					<Label className="text-xs text-muted-foreground">Source</Label>
+					<Input
+						value={rule.source}
+						onChange={(e) => onChange({ ...rule, source: e.target.value })}
+						onBlur={onBlur}
+						placeholder=".env or .cursor"
+					/>
+				</div>
+				<div className="space-y-1.5">
+					<Label className="text-xs text-muted-foreground">Target</Label>
+					<Input
+						value={rule.target ?? ""}
+						onChange={(e) => onChange({ ...rule, target: e.target.value })}
+						onBlur={onBlur}
+						placeholder="Optional. Defaults to source path"
+					/>
+				</div>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon"
+					onClick={onRemove}
+					disabled={isOnlyRow}
+					aria-label="Remove copy rule"
+					className="shrink-0"
+				>
+					<HiTrash className="h-4 w-4" />
+				</Button>
+			</div>
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+				<div className="flex items-center justify-between gap-3 sm:justify-start">
+					<div className="space-y-0.5">
+						<Label className="text-sm font-medium">Optional</Label>
+						<p className="text-xs text-muted-foreground">
+							Skip this copy if the source does not exist.
+						</p>
+					</div>
+					<Switch
+						checked={rule.optional ?? false}
+						onCheckedChange={(optional) => onChange({ ...rule, optional })}
+					/>
+				</div>
+				<div className="flex items-center justify-between gap-3 sm:justify-start">
+					<div className="space-y-0.5">
+						<Label className="text-sm font-medium">Overwrite</Label>
+						<p className="text-xs text-muted-foreground">
+							Replace the target if it already exists in the workspace.
+						</p>
+					</div>
+					<Switch
+						checked={rule.overwrite ?? false}
+						onCheckedChange={(overwrite) => onChange({ ...rule, overwrite })}
+					/>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 	const utils = electronTrpc.useUtils();
 
@@ -181,13 +252,19 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 	const [setupContent, setSetupContent] = useState("");
 	const [teardownContent, setTeardownContent] = useState("");
 	const [runContent, setRunContent] = useState("");
+	const [copyRules, setCopyRules] = useState<WorkspaceCopyRule[]>([
+		EMPTY_COPY_RULE,
+	]);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const latestContentRef = useRef({
 		setup: "",
 		teardown: "",
 		run: "",
+		copy: [EMPTY_COPY_RULE] as WorkspaceCopyRule[],
 	});
-	const lastSavedPayloadRef = useRef('{"setup":[],"teardown":[],"run":[]}');
+	const lastSavedPayloadRef = useRef(
+		'{"setup":[],"teardown":[],"run":[],"copy":[]}',
+	);
 	const saveInFlightRef = useRef(false);
 	const saveQueuedRef = useRef(false);
 	const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -197,20 +274,32 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 		setup: setupContent,
 		teardown: teardownContent,
 		run: runContent,
+		copy: copyRules,
 	};
 
 	const buildPayload = useCallback(
-		(content: { setup: string; teardown: string; run: string }) => ({
+		(content: {
+			setup: string;
+			teardown: string;
+			run: string;
+			copy: WorkspaceCopyRule[];
+		}) => ({
 			projectId,
 			setup: content.setup.trim() ? [content.setup.trim()] : [],
 			teardown: content.teardown.trim() ? [content.teardown.trim()] : [],
 			run: content.run.trim() ? [content.run.trim()] : [],
+			copy: buildCopyPayload(content.copy),
 		}),
 		[projectId],
 	);
 
 	const serializePayload = useCallback(
-		(payload: { setup: string[]; teardown: string[]; run: string[] }) =>
+		(payload: {
+			setup: string[];
+			teardown: string[];
+			run: string[];
+			copy: WorkspaceCopyRule[];
+		}) =>
 			JSON.stringify(payload),
 		[],
 	);
@@ -226,11 +315,13 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 		setSetupContent(parsed.setup);
 		setTeardownContent(parsed.teardown);
 		setRunContent(parsed.run);
+		setCopyRules(parsed.copy.length > 0 ? parsed.copy : [EMPTY_COPY_RULE]);
 		lastSavedPayloadRef.current = serializePayload(
 			buildPayload({
 				setup: parsed.setup,
 				teardown: parsed.teardown,
 				run: parsed.run,
+				copy: parsed.copy,
 			}),
 		);
 	}, [buildPayload, configData?.content, serializePayload]);
@@ -340,6 +431,37 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 		[debouncedSave],
 	);
 
+	const handleCopyRuleChange = useCallback(
+		(index: number, nextRule: WorkspaceCopyRule) => {
+			setCopyRules((currentRules) => {
+				const nextRules = currentRules.map((rule, currentIndex) =>
+					currentIndex === index ? nextRule : rule,
+				);
+				return nextRules;
+			});
+			debouncedSave();
+		},
+		[debouncedSave],
+	);
+
+	const handleAddCopyRule = useCallback(() => {
+		setCopyRules((currentRules) => [...currentRules, EMPTY_COPY_RULE]);
+		debouncedSave();
+	}, [debouncedSave]);
+
+	const handleRemoveCopyRule = useCallback(
+		(index: number) => {
+			setCopyRules((currentRules) => {
+				if (currentRules.length === 1) {
+					return [EMPTY_COPY_RULE];
+				}
+				return currentRules.filter((_, currentIndex) => currentIndex !== index);
+			});
+			debouncedSave();
+		},
+		[debouncedSave],
+	);
+
 	if (isLoading) {
 		return (
 			<div className={cn("space-y-4", className)}>
@@ -368,8 +490,8 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 						)}
 					</div>
 					<p className="text-sm text-muted-foreground">
-						Automate your workspace lifecycle with setup and teardown scripts.
-						Changes are saved automatically.
+						Automate workspace setup, bootstrap file copies, teardown, and run
+						commands. Changes are saved automatically.
 					</p>
 				</div>
 				<Button variant="outline" size="sm" asChild>
@@ -410,6 +532,41 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 				onChange={handleRunChange}
 				onBlur={handleBlurSave}
 			/>
+
+			<div className="space-y-3">
+				<div className="flex items-start justify-between gap-4">
+					<div>
+						<h4 className="text-sm font-medium">Copy to Workspace</h4>
+						<p className="text-xs text-muted-foreground mt-0.5">
+							Copy files or directories from the main repo into each workspace
+							before setup runs. Leave target blank to reuse the source path.
+						</p>
+					</div>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={handleAddCopyRule}
+						className="gap-1.5"
+					>
+						<HiPlus className="h-3.5 w-3.5" />
+						Add rule
+					</Button>
+				</div>
+
+				<div className="space-y-3">
+					{copyRules.map((rule, index) => (
+						<CopyRuleRow
+							key={`copy-rule-${index}-${rule.source}-${rule.target ?? ""}`}
+							rule={rule}
+							isOnlyRow={copyRules.length === 1}
+							onChange={(nextRule) => handleCopyRuleChange(index, nextRule)}
+							onRemove={() => handleRemoveCopyRule(index)}
+							onBlur={handleBlurSave}
+						/>
+					))}
+				</div>
+			</div>
 		</div>
 	);
 }

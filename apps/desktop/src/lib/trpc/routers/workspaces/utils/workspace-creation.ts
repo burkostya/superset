@@ -14,7 +14,11 @@ import {
 } from "./db-helpers";
 import { listExternalWorktrees, worktreeExists } from "./git";
 import { resolveWorktreePath } from "./resolve-worktree-path";
-import { copySupersetConfigToWorktree, loadSetupConfig } from "./setup";
+import {
+	copyProjectEntriesToWorktree,
+	copySupersetConfigToWorktree,
+	loadSetupConfig,
+} from "./setup";
 
 interface CreateWorkspaceFromWorktreeParams {
 	projectId: string;
@@ -209,6 +213,11 @@ export async function createWorkspaceFromExternalWorktree({
 			worktreePath: externalMatch.path,
 			projectId: project.id,
 		});
+		copyProjectEntriesToWorktree(
+			project.mainRepoPath,
+			externalMatch.path,
+			setupConfig?.copy,
+		);
 
 		track("workspace_created", {
 			workspace_id: workspace.id,
@@ -366,6 +375,11 @@ export async function openExternalWorktree({
 			worktreePath: existingWorktree.path,
 			projectId: project.id,
 		});
+		copyProjectEntriesToWorktree(
+			project.mainRepoPath,
+			existingWorktree.path,
+			setupConfig?.copy,
+		);
 
 		track("workspace_opened", {
 			workspace_id: workspace.id,
@@ -432,6 +446,11 @@ export async function openExternalWorktree({
 		worktreePath,
 		projectId: project.id,
 	});
+	copyProjectEntriesToWorktree(
+		project.mainRepoPath,
+		worktreePath,
+		setupConfig?.copy,
+	);
 
 	track("workspace_created", {
 		workspace_id: workspace.id,
