@@ -1,6 +1,7 @@
 import type { GitHubStatus } from "@superset/local-db";
 import { Button } from "@superset/ui/button";
 import { ButtonGroup } from "@superset/ui/button-group";
+import { Checkbox } from "@superset/ui/checkbox";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -11,7 +12,7 @@ import {
 import { toast } from "@superset/ui/sonner";
 import { Textarea } from "@superset/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	VscArrowDown,
 	VscArrowUp,
@@ -52,12 +53,23 @@ export function CommitInput({
 	onRefresh,
 }: CommitInputProps) {
 	const [commitMessage, setCommitMessage] = useState("");
+	const [isAmendMode, setIsAmendMode] = useState(false);
+	const [isAmendMessageLoading, setIsAmendMessageLoading] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
+	const amendRequestIdRef = useRef(0);
+
+	const headCommitMessageQuery =
+		electronTrpc.changes.getHeadCommitMessage.useQuery(
+			{ worktreePath },
+			{ enabled: false },
+		);
+	const refetchHeadCommitMessage = headCommitMessageQuery.refetch;
 
 	const commitMutation = electronTrpc.changes.commit.useMutation({
-		onSuccess: () => {
-			toast.success("Committed");
+		onSuccess: (_data, variables) => {
+			toast.success(variables.amend ? "Amended commit" : "Committed");
 			setCommitMessage("");
+			setIsAmendMode(false);
 			onRefresh();
 		},
 		onError: (error) => toast.error(`Commit failed: ${error.message}`),
@@ -109,7 +121,10 @@ export function CommitInput({
 		isCreateOrOpenPRPending ||
 		fetchMutation.isPending;
 
-	const canCommit = hasStagedChanges && commitMessage.trim();
+	const trimmedCommitMessage = commitMessage.trim();
+	const canSubmit = isAmendMode
+		? Boolean(trimmedCommitMessage)
+		: Boolean(hasStagedChanges && trimmedCommitMessage);
 	const hasExistingPR = Boolean(pullRequest);
 	const prUrl = pullRequest?.url;
 	const pushActionCopy = getPushActionCopy({
@@ -118,28 +133,98 @@ export function CommitInput({
 		pullRequest,
 	});
 
-	const handleCommit = () => {
-		if (!canCommit) return;
-		commitMutation.mutate({ worktreePath, message: commitMessage.trim() });
+	useEffect(() => {
+		if (!isAmendMode) {
+			setIsAmendMessageLoading(false);
+			return;
+		}
+
+		const requestId = amendRequestIdRef.current + 1;
+		amendRequestIdRef.current = requestId;
+		setIsAmendMessageLoading(true);
+
+		void refetchHeadCommitMessage()
+			.then((result) => {
+				if (amendRequestIdRef.current !== requestId) {
+					return;
+				}
+
+				if (result.error) {
+					toast.error(`Failed to load previous commit: ${result.error.message}`);
+					setIsAmendMode(false);
+					return;
+				}
+
+				const message = result.data?.message ?? null;
+				if (message === null) {
+					toast.error("No previous commit found to amend");
+					setIsAmendMode(false);
+					return;
+				}
+
+				setCommitMessage(message);
+			})
+			.finally(() => {
+				if (amendRequestIdRef.current === requestId) {
+					setIsAmendMessageLoading(false);
+				}
+			});
+	}, [isAmendMode, refetchHeadCommitMessage]);
+
+	const handleAmendToggle = (checked: boolean) => {
+		if (!checked) {
+			amendRequestIdRef.current += 1;
+			setIsAmendMessageLoading(false);
+		}
+		setIsAmendMode(checked);
 	};
 
-	const handlePush = () => {
+	const runCommit = (onSuccess?: () => void) => {
+		if (!canSubmit) return;
+		commitMutation.mutate(
+			{
+				worktreePath,
+				message: trimmedCommitMessage,
+				amend: isAmendMode,
+			},
+			onSuccess ? { onSuccess } : undefined,
+		);
+	};
+
+	const triggerPush = ({
+		forceWithLease = false,
+		onSuccess,
+		skipAutoCreatePR = false,
+	}: {
+		forceWithLease?: boolean;
+		onSuccess?: () => void;
+		skipAutoCreatePR?: boolean;
+	} = {}) => {
 		const isPublishing = !hasUpstream;
 		pushMutation.mutate(
-			{ worktreePath, setUpstream: true },
+			{
+				worktreePath,
+				setUpstream: true,
+				forceWithLease,
+			},
 			{
 				onSuccess: () => {
 					if (
 						isPublishing &&
 						!hasExistingPR &&
-						shouldAutoCreatePRAfterPublish
+						shouldAutoCreatePRAfterPublish &&
+						!skipAutoCreatePR
 					) {
 						createOrOpenPR();
 					}
+					onSuccess?.();
 				},
 			},
 		);
 	};
+
+	const handleCommit = () => runCommit();
+	const handlePush = () => triggerPush();
 	const handlePull = () => pullMutation.mutate({ worktreePath });
 	const handleSync = () => syncMutation.mutate({ worktreePath });
 	const handleFetch = () => fetchMutation.mutate({ worktreePath });
@@ -156,32 +241,27 @@ export function CommitInput({
 	const handleOpenPR = () => prUrl && window.open(prUrl, "_blank");
 
 	const handleCommitAndPush = () => {
-		if (!canCommit) return;
-		commitMutation.mutate(
-			{ worktreePath, message: commitMessage.trim() },
-			{ onSuccess: handlePush },
+		runCommit(() =>
+			triggerPush({ forceWithLease: isAmendMode && hasUpstream }),
 		);
 	};
 
 	const handleCommitPushAndCreatePR = () => {
-		if (!canCommit) return;
-		commitMutation.mutate(
-			{ worktreePath, message: commitMessage.trim() },
-			{
-				onSuccess: () => {
-					pushMutation.mutate(
-						{ worktreePath, setUpstream: true },
-						{ onSuccess: handleCreatePR },
-					);
-				},
-			},
+		runCommit(() =>
+			triggerPush({
+				forceWithLease: isAmendMode && hasUpstream,
+				onSuccess: handleCreatePR,
+				skipAutoCreatePR: true,
+			}),
 		);
 	};
 
 	const primaryAction = getPrimaryAction({
-		canCommit: Boolean(canCommit),
+		canSubmit,
 		hasStagedChanges,
 		isPending,
+		isAmendMode,
+		isAmendMessageLoading,
 		pushCount,
 		pullCount,
 		hasUpstream,
@@ -191,7 +271,7 @@ export function CommitInput({
 	const primary = {
 		...primaryAction,
 		icon:
-			primaryAction.action === "commit" ? (
+			primaryAction.action === "commit" || primaryAction.action === "amend" ? (
 				<VscCheck className="size-4" />
 			) : primaryAction.action === "sync" ? (
 				<VscSync className="size-4" />
@@ -201,7 +281,7 @@ export function CommitInput({
 				<VscArrowUp className="size-4" />
 			),
 		handler:
-			primaryAction.action === "commit"
+			primaryAction.action === "commit" || primaryAction.action === "amend"
 				? handleCommit
 				: primaryAction.action === "sync"
 					? handleSync
@@ -209,6 +289,13 @@ export function CommitInput({
 						? handlePull
 						: handlePush,
 	};
+
+	const submitLabel = isAmendMode ? "Amend" : "Commit";
+	const submitWithPushLabel = isAmendMode ? "Amend & Push" : "Commit & Push";
+	const submitWithPRLabel = isAmendMode
+		? "Amend, Push & Create PR"
+		: "Commit, Push & Create PR";
+	const submitDisabled = !canSubmit || isAmendMessageLoading;
 
 	const countBadge =
 		pushCount > 0 || pullCount > 0
@@ -221,7 +308,8 @@ export function CommitInput({
 				placeholder="Commit message"
 				value={commitMessage}
 				onChange={(e) => setCommitMessage(e.target.value)}
-				className="min-h-[52px] resize-none text-[10px] bg-background"
+				className="min-h-[52px] resize-none bg-background text-[10px]"
+				disabled={isAmendMessageLoading}
 				onKeyDown={(e) => {
 					if (
 						e.key === "Enter" &&
@@ -233,13 +321,26 @@ export function CommitInput({
 					}
 				}}
 			/>
+			<div className="flex items-center gap-1.5">
+				<Checkbox
+					id={`amend-commit-${worktreePath}`}
+					checked={isAmendMode}
+					onCheckedChange={(checked) => handleAmendToggle(checked === true)}
+				/>
+				<label
+					htmlFor={`amend-commit-${worktreePath}`}
+					className="cursor-pointer select-none text-[10px] text-muted-foreground"
+				>
+					Amend previous commit
+				</label>
+			</div>
 			<ButtonGroup className="w-full">
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button
 							variant="secondary"
 							size="sm"
-							className="flex-1 gap-1.5 h-7 text-xs"
+							className="h-7 flex-1 gap-1.5 text-xs"
 							onClick={primary.handler}
 							disabled={primary.disabled}
 						>
@@ -266,28 +367,28 @@ export function CommitInput({
 					<DropdownMenuContent align="end" className="w-48 text-xs">
 						<DropdownMenuItem
 							onClick={handleCommit}
-							disabled={!canCommit}
+							disabled={submitDisabled}
 							className="text-xs"
 						>
 							<VscCheck className="size-3.5" />
-							Commit
+							{submitLabel}
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={handleCommitAndPush}
-							disabled={!canCommit}
+							disabled={submitDisabled}
 							className="text-xs"
 						>
 							<VscArrowUp className="size-3.5" />
-							Commit & Push
+							{submitWithPushLabel}
 						</DropdownMenuItem>
 						{!hasExistingPR && canCreatePR && (
 							<DropdownMenuItem
 								onClick={handleCommitPushAndCreatePR}
-								disabled={!canCommit}
+								disabled={submitDisabled}
 								className="text-xs"
 							>
 								<VscLinkExternal className="size-3.5" />
-								Commit, Push & Create PR
+								{submitWithPRLabel}
 							</DropdownMenuItem>
 						)}
 

@@ -16,6 +16,7 @@ import {
 	pushCurrentBranch,
 	pushWithResolvedUpstream,
 } from "./utils/git-push";
+import { commitChanges, readHeadCommitMessage } from "./utils/commit";
 import { mergePullRequest } from "./utils/merge-pull-request";
 import {
 	buildNewPullRequestUrl,
@@ -57,6 +58,7 @@ export const createGitOperationsRouter = () => {
 				z.object({
 					worktreePath: z.string(),
 					message: z.string(),
+					amend: z.boolean().optional().default(false),
 				}),
 			)
 			.mutation(
@@ -64,17 +66,36 @@ export const createGitOperationsRouter = () => {
 					assertRegisteredWorktree(input.worktreePath);
 
 					const git = await getGitWithShellPath(input.worktreePath);
-					const result = await git.commit(input.message);
+					const hash = await commitChanges({
+						git,
+						message: input.message,
+						amend: input.amend,
+					});
 					clearStatusCacheForWorktree(input.worktreePath);
-					return { success: true, hash: result.commit };
+					return { success: true, hash };
 				},
 			),
+
+		getHeadCommitMessage: publicProcedure
+			.input(
+				z.object({
+					worktreePath: z.string(),
+				}),
+			)
+			.query(async ({ input }): Promise<{ message: string | null }> => {
+				assertRegisteredWorktree(input.worktreePath);
+
+				const git = await getGitWithShellPath(input.worktreePath);
+				const message = await readHeadCommitMessage(git);
+				return { message };
+			}),
 
 		push: publicProcedure
 			.input(
 				z.object({
 					worktreePath: z.string(),
 					setUpstream: z.boolean().optional(),
+					forceWithLease: z.boolean().optional().default(false),
 				}),
 			)
 			.mutation(async ({ input }): Promise<{ success: boolean }> => {
@@ -92,12 +113,14 @@ export const createGitOperationsRouter = () => {
 						git,
 						worktreePath: input.worktreePath,
 						localBranch,
+						forceWithLease: input.forceWithLease,
 					});
 				} else {
 					await pushCurrentBranch({
 						git,
 						worktreePath: input.worktreePath,
 						localBranch,
+						forceWithLease: input.forceWithLease,
 					});
 				}
 

@@ -96,10 +96,12 @@ async function pushWithSetUpstream({
 	git,
 	targetBranch,
 	remote,
+	forceWithLease = false,
 }: {
 	git: SimpleGit;
 	targetBranch: string;
 	remote?: string;
+	forceWithLease?: boolean;
 }): Promise<void> {
 	const trimmedBranch = targetBranch.trim();
 	if (!trimmedBranch || trimmedBranch === "HEAD") {
@@ -115,6 +117,7 @@ async function pushWithSetUpstream({
 	// Use HEAD refspec to avoid resolving the branch name as a local ref.
 	// This is more reliable for worktrees where upstream tracking isn't set yet.
 	await git.push([
+		...(forceWithLease ? ["--force-with-lease"] : []),
 		"--set-upstream",
 		targetRemote,
 		`HEAD:refs/heads/${trimmedBranch}`,
@@ -204,10 +207,12 @@ export async function pushWithResolvedUpstream({
 	git,
 	worktreePath,
 	localBranch,
+	forceWithLease = false,
 }: {
 	git: SimpleGit;
 	worktreePath: string;
 	localBranch: string;
+	forceWithLease?: boolean;
 }): Promise<void> {
 	const fallbackRemote = await getTrackingRemote(git);
 	const existingPullRequestTarget = await resolveExistingPullRequestPushTarget({
@@ -221,6 +226,7 @@ export async function pushWithResolvedUpstream({
 			git,
 			remote: existingPullRequestTarget.remote,
 			targetBranch: existingPullRequestTarget.targetBranch,
+			forceWithLease,
 		});
 		return;
 	}
@@ -229,6 +235,7 @@ export async function pushWithResolvedUpstream({
 		git,
 		remote: fallbackRemote,
 		targetBranch: localBranch,
+		forceWithLease,
 	});
 }
 
@@ -249,10 +256,12 @@ export async function pushCurrentBranch({
 	git,
 	worktreePath,
 	localBranch,
+	forceWithLease = false,
 }: {
 	git: SimpleGit;
 	worktreePath: string;
 	localBranch: string;
+	forceWithLease?: boolean;
 }): Promise<void> {
 	const mismatchedPullRequestTarget =
 		await resolveMismatchedPullRequestPushTarget({
@@ -265,12 +274,13 @@ export async function pushCurrentBranch({
 			git,
 			remote: mismatchedPullRequestTarget.remote,
 			targetBranch: mismatchedPullRequestTarget.targetBranch,
+			forceWithLease,
 		});
 		return;
 	}
 
 	try {
-		await git.push();
+		await git.push(forceWithLease ? ["--force-with-lease"] : []);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		if (shouldRetryPushWithUpstream(message)) {
@@ -278,6 +288,7 @@ export async function pushCurrentBranch({
 				git,
 				worktreePath,
 				localBranch,
+				forceWithLease,
 			});
 			return;
 		}

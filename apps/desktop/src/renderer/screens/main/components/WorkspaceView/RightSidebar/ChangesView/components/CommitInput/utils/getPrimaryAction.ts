@@ -1,11 +1,13 @@
 import type { PushActionCopy } from "./getPushActionCopy";
 
-export type PrimaryActionType = "commit" | "sync" | "push" | "pull";
+export type PrimaryActionType = "commit" | "amend" | "sync" | "push" | "pull";
 
 export interface PrimaryActionInput {
-	canCommit: boolean;
+	canSubmit: boolean;
 	hasStagedChanges: boolean;
 	isPending: boolean;
+	isAmendMode: boolean;
+	isAmendMessageLoading: boolean;
 	pushCount: number;
 	pullCount: number;
 	hasUpstream: boolean;
@@ -20,15 +22,30 @@ export interface PrimaryActionState {
 }
 
 export function getPrimaryAction({
-	canCommit,
+	canSubmit,
 	hasStagedChanges,
 	isPending,
+	isAmendMode,
+	isAmendMessageLoading,
 	pushCount,
 	pullCount,
 	hasUpstream,
 	pushActionCopy,
 }: PrimaryActionInput): PrimaryActionState {
-	if (canCommit) {
+	if (isAmendMode) {
+		return {
+			action: "amend",
+			label: "Amend",
+			disabled: isPending || isAmendMessageLoading || !canSubmit,
+			tooltip: isAmendMessageLoading
+				? "Loading previous commit message"
+				: canSubmit
+					? "Amend previous commit"
+					: "Enter a message",
+		};
+	}
+
+	if (canSubmit) {
 		return {
 			action: "commit",
 			label: "Commit",
