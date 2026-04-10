@@ -22,6 +22,10 @@ interface ScriptsEditorProps {
 	className?: string;
 }
 
+interface CopyRuleDraft extends WorkspaceCopyRule {
+	id: string;
+}
+
 interface ScriptTextareaProps {
 	title: string;
 	description: string;
@@ -162,10 +166,31 @@ const EMPTY_COPY_RULE: WorkspaceCopyRule = {
 	overwrite: false,
 };
 
+function createCopyRuleDraft(
+	rule: Partial<WorkspaceCopyRule> = EMPTY_COPY_RULE,
+): CopyRuleDraft {
+	return {
+		id: crypto.randomUUID(),
+		source: rule.source ?? "",
+		target: rule.target ?? "",
+		optional: rule.optional ?? false,
+		overwrite: rule.overwrite ?? false,
+	};
+}
+
+function toWorkspaceCopyRule(rule: CopyRuleDraft): WorkspaceCopyRule {
+	return {
+		source: rule.source,
+		target: rule.target,
+		optional: rule.optional,
+		overwrite: rule.overwrite,
+	};
+}
+
 interface CopyRuleRowProps {
-	rule: WorkspaceCopyRule;
+	rule: CopyRuleDraft;
 	isOnlyRow: boolean;
-	onChange: (nextRule: WorkspaceCopyRule) => void;
+	onChange: (nextRule: CopyRuleDraft) => void;
 	onRemove: () => void;
 	onBlur: () => void;
 }
@@ -252,15 +277,15 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 	const [setupContent, setSetupContent] = useState("");
 	const [teardownContent, setTeardownContent] = useState("");
 	const [runContent, setRunContent] = useState("");
-	const [copyRules, setCopyRules] = useState<WorkspaceCopyRule[]>([
-		EMPTY_COPY_RULE,
+	const [copyRules, setCopyRules] = useState<CopyRuleDraft[]>([
+		createCopyRuleDraft(),
 	]);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const latestContentRef = useRef({
 		setup: "",
 		teardown: "",
 		run: "",
-		copy: [EMPTY_COPY_RULE] as WorkspaceCopyRule[],
+		copy: [createCopyRuleDraft()] as CopyRuleDraft[],
 	});
 	const lastSavedPayloadRef = useRef(
 		'{"setup":[],"teardown":[],"run":[],"copy":[]}',
@@ -282,13 +307,13 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 			setup: string;
 			teardown: string;
 			run: string;
-			copy: WorkspaceCopyRule[];
+			copy: CopyRuleDraft[];
 		}) => ({
 			projectId,
 			setup: content.setup.trim() ? [content.setup.trim()] : [],
 			teardown: content.teardown.trim() ? [content.teardown.trim()] : [],
 			run: content.run.trim() ? [content.run.trim()] : [],
-			copy: buildCopyPayload(content.copy),
+			copy: buildCopyPayload(content.copy.map(toWorkspaceCopyRule)),
 		}),
 		[projectId],
 	);
@@ -312,16 +337,20 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 		}
 
 		const parsed = parseContentFromConfig(configData?.content ?? null);
+		const parsedCopyRules =
+			parsed.copy.length > 0
+				? parsed.copy.map((rule) => createCopyRuleDraft(rule))
+				: [createCopyRuleDraft()];
 		setSetupContent(parsed.setup);
 		setTeardownContent(parsed.teardown);
 		setRunContent(parsed.run);
-		setCopyRules(parsed.copy.length > 0 ? parsed.copy : [EMPTY_COPY_RULE]);
+		setCopyRules(parsedCopyRules);
 		lastSavedPayloadRef.current = serializePayload(
 			buildPayload({
 				setup: parsed.setup,
 				teardown: parsed.teardown,
 				run: parsed.run,
-				copy: parsed.copy,
+				copy: parsedCopyRules,
 			}),
 		);
 	}, [buildPayload, configData?.content, serializePayload]);
@@ -432,7 +461,7 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 	);
 
 	const handleCopyRuleChange = useCallback(
-		(index: number, nextRule: WorkspaceCopyRule) => {
+		(index: number, nextRule: CopyRuleDraft) => {
 			setCopyRules((currentRules) => {
 				const nextRules = currentRules.map((rule, currentIndex) =>
 					currentIndex === index ? nextRule : rule,
@@ -445,7 +474,7 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 	);
 
 	const handleAddCopyRule = useCallback(() => {
-		setCopyRules((currentRules) => [...currentRules, EMPTY_COPY_RULE]);
+		setCopyRules((currentRules) => [...currentRules, createCopyRuleDraft()]);
 		debouncedSave();
 	}, [debouncedSave]);
 
@@ -453,7 +482,7 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 		(index: number) => {
 			setCopyRules((currentRules) => {
 				if (currentRules.length === 1) {
-					return [EMPTY_COPY_RULE];
+					return [createCopyRuleDraft()];
 				}
 				return currentRules.filter((_, currentIndex) => currentIndex !== index);
 			});
@@ -557,7 +586,7 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 				<div className="space-y-3">
 					{copyRules.map((rule, index) => (
 						<CopyRuleRow
-							key={`copy-rule-${index}-${rule.source}-${rule.target ?? ""}`}
+							key={rule.id}
 							rule={rule}
 							isOnlyRow={copyRules.length === 1}
 							onChange={(nextRule) => handleCopyRuleChange(index, nextRule)}
